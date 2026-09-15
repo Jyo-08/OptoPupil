@@ -15,7 +15,11 @@ export class ONNXRuntimeService {
         return ONNXRuntimeService.instance;
     }
 
-    public async initialize(testModelSource?: string | ArrayBufferLike | Uint8Array): Promise<void> {
+    public isReady(): boolean {
+        return this.session !== null;
+    }
+
+    public async initialize(testModelSource?: string | Uint8Array): Promise<void> {
         if (this.session) {
             return;
         }
@@ -28,22 +32,24 @@ export class ONNXRuntimeService {
         return this.initializationPromise;
     }
 
-    private async _initialize(testModelSource?: string | ArrayBufferLike | Uint8Array): Promise<void> {
+    private async _initialize(testModelSource?: string | Uint8Array): Promise<void> {
         try {
             // Default model URL as required
-            const modelSource = testModelSource || '/models/pupil_segmentation.onnx';
+            const modelSource: string | Uint8Array = testModelSource || '/models/pupil_segmentation.onnx';
+
+            const createSession = (opts: ort.InferenceSession.SessionOptions) => {
+                return typeof modelSource === 'string'
+                    ? ort.InferenceSession.create(modelSource, opts)
+                    : ort.InferenceSession.create(modelSource, opts);
+            };
 
             // Try WebGPU first, then WASM
             try {
-                this.session = await ort.InferenceSession.create(modelSource, {
-                    executionProviders: ['webgpu']
-                });
+                this.session = await createSession({ executionProviders: ['webgpu'] });
                 this.providerUsed = 'webgpu';
             } catch (e) {
                 console.warn('WebGPU execution provider failed or is unavailable. Falling back to WASM.');
-                this.session = await ort.InferenceSession.create(modelSource, {
-                    executionProviders: ['wasm']
-                });
+                this.session = await createSession({ executionProviders: ['wasm'] });
                 this.providerUsed = 'wasm';
             }
 

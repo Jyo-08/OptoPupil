@@ -327,6 +327,25 @@ function drawEyeContour(
   ctx.fill();
 }
 
+function drawMirroredText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  font: string,
+  fillStyle: string
+) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(-1, 1); // Invert text so it displays forward on -scale-x-100 mirrored canvas
+  ctx.font = font;
+  ctx.fillStyle = fillStyle;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
+
 function drawIrisOverlay(
   ctx: CanvasRenderingContext2D,
   iris: { center: NormalizedLandmark; perimeter: readonly NormalizedLandmark[] | NormalizedLandmark[]; estimatedRadiusNorm: number },
@@ -348,10 +367,15 @@ function drawIrisOverlay(
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Tag
-  ctx.font = '9px "JetBrains Mono", monospace';
-  ctx.fillStyle = '#94a3b8';
-  ctx.fillText(`IRIS (${label})`, cx - 18, cy - radiusPx - 5);
+  // Tag with unmirrored text
+  drawMirroredText(
+    ctx,
+    `IRIS (${label})`,
+    cx,
+    cy - radiusPx - 8,
+    '10px "JetBrains Mono", monospace',
+    '#94a3b8'
+  );
 }
 
 function drawPupilOverlay(
@@ -397,12 +421,19 @@ function drawPupilOverlay(
   ctx.fillStyle = 'rgba(168, 85, 247, 0.15)';
   ctx.fill();
 
-  // Draw Pupil Diameter Tag (in pixels)
+  // Draw Pupil Diameter Tag with unmirrored physical and pixel readings
   if (pupil.diameterPx) {
-    ctx.font = '10px "JetBrains Mono", monospace';
-    ctx.fillStyle = '#f1f5f9';
-    const text = `${label}: ${pupil.diameterPx.toFixed(1)}px`;
-    ctx.fillText(text, cx - 30, cy + radiusPx + 14);
+    const text = pupil.diameterMm
+      ? `${label}: ${pupil.diameterMm.toFixed(1)}mm (${pupil.diameterPx.toFixed(1)}px)`
+      : `${label}: ${pupil.diameterPx.toFixed(1)}px`;
+    drawMirroredText(
+      ctx,
+      text,
+      cx,
+      cy + radiusPx + 14,
+      'bold 10px "JetBrains Mono", monospace',
+      '#f1f5f9'
+    );
   }
 }
 

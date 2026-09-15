@@ -1,6 +1,7 @@
-import { ExtractedOcularData, EyeLandmarkSet, IrisLandmarkSet, BilateralPupilData } from '../../types/vision';
+import type { ExtractedOcularData, EyeLandmarkSet, IrisLandmarkSet, BilateralPupilData } from '../../types/vision';
 import { NeuralPupilSegmenter } from './NeuralPupilSegmenter';
-import { PupilGeometryExtractor, PupilGeometryResult } from './PupilGeometryExtractor';
+import { PupilGeometryExtractor } from './PupilGeometryExtractor';
+import type { PupilGeometryResult } from './PupilGeometryExtractor';
 import { ONNXRuntimeService } from './ONNXRuntimeService';
 import { NeuralPupilComparison } from './NeuralPupilComparison';
 
@@ -24,7 +25,6 @@ export class LiveNeuralPupilPipeline {
     private isInferring: boolean = false;
     private offscreenCanvas: HTMLCanvasElement | null = null;
     private offscreenCtx: CanvasRenderingContext2D | null = null;
-    private lastLogTime = 0;
 
     private constructor() {
         this.segmenter = new NeuralPupilSegmenter();
@@ -51,7 +51,7 @@ export class LiveNeuralPupilPipeline {
      * Skips the frame if an inference batch is already in flight.
      */
     public async processFrame(video: HTMLVideoElement, ocularData: ExtractedOcularData, deterministicData: BilateralPupilData, timestamp: number): Promise<void> {
-        if (this.isInferring) {
+        if (this.isInferring || !ONNXRuntimeService.getInstance().isReady()) {
             return;
         }
         this.isInferring = true;
@@ -59,16 +59,15 @@ export class LiveNeuralPupilPipeline {
         try {
             const startMs = performance.now();
             
-            // Extract and infer independently for both eyes using the same video frame timestamp
-            const leftPromise = ocularData.leftIris && ocularData.leftEye 
-                ? this.processEye(video, ocularData.leftIris, ocularData.leftEye) 
-                : Promise.resolve(null);
+            // ONNX Runtime WebAssembly sessions are single-threaded/non-reentrant.
+            // Run left and right eyes sequentially to avoid "Session already started" error.
+            const leftResult = ocularData.leftIris && ocularData.leftEye 
+                ? await this.processEye(video, ocularData.leftIris, ocularData.leftEye) 
+                : null;
                 
-            const rightPromise = ocularData.rightIris && ocularData.rightEye 
-                ? this.processEye(video, ocularData.rightIris, ocularData.rightEye) 
-                : Promise.resolve(null);
-            
-            const [leftResult, rightResult] = await Promise.all([leftPromise, rightPromise]);
+            const rightResult = ocularData.rightIris && ocularData.rightEye 
+                ? await this.processEye(video, ocularData.rightIris, ocularData.rightEye) 
+                : null;
             
             const duration = performance.now() - startMs;
             const valid = !!(leftResult?.valid || rightResult?.valid);
@@ -155,9 +154,16 @@ export class LiveNeuralPupilPipeline {
         
         const videoCentroidX = minX + geometry.centroidX * scaleX;
         const videoCentroidY = minY + geometry.centroidY * scaleY;
+        const videoDiameterPx = geometry.equivalentDiameterPx * scaleX;
 
         return {
             ...geometry,
+            equivalentDiameterPx: videoDiameterPx,
+            areaPx: geometry.areaPx * scaleX * scaleY,
+            bboxX: minX + geometry.bboxX * scaleX,
+            bboxY: minY + geometry.bboxY * scaleY,
+            bboxWidth: geometry.bboxWidth * scaleX,
+            bboxHeight: geometry.bboxHeight * scaleY,
             videoCentroidX,
             videoCentroidY
         };

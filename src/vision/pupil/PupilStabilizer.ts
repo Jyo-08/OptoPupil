@@ -100,6 +100,13 @@ export class SinglePupilStabilizer {
 
       this.addStatSample(smoothedDiameterPx);
 
+      const smoothedDiameterMm =
+        raw.diameterMm !== undefined && raw.diameterMm !== null
+          ? this.prevStabilized?.diameterMm
+            ? Number((a * raw.diameterMm + (1 - a) * this.prevStabilized.diameterMm).toFixed(2))
+            : raw.diameterMm
+          : null;
+
       const stabilized: PupilGeometry = {
         detected: raw.detected,
         status: raw.status,
@@ -107,6 +114,7 @@ export class SinglePupilStabilizer {
         centerNorm: { x: smoothedNormX, y: smoothedNormY, z: 0 },
         radiusPx: smoothedRadiusPx,
         diameterPx: smoothedDiameterPx,
+        diameterMm: smoothedDiameterMm,
         majorAxisPx: raw.majorAxisPx,
         minorAxisPx: raw.minorAxisPx,
         angleRad: raw.angleRad,

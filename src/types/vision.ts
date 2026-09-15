@@ -70,6 +70,8 @@ export interface PupilGeometry {
   centerPx: PixelPoint | null;
   radiusPx: number | null;
   diameterPx: number | null;
+  // Calibrated real-world physical diameter in millimeters
+  diameterMm?: number | null;
   // Ellipse fitting properties (major/minor axis & orientation angle)
   majorAxisPx?: number;
   minorAxisPx?: number;

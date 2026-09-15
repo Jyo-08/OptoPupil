@@ -104,6 +104,7 @@ export function useMeasurementPersistence({
   // Session lock ensuring exactly ONE stimulus trigger and ONE final DB record per session
   const hasTriggeredForSessionRef = useRef<boolean>(false);
   const isWritingFinalRef = useRef<boolean>(false);
+  const consecutiveDropsRef = useRef<number>(0);
 
   // Start a fresh screening session with a new unique session_id
   const startNewSession = useCallback(() => {
@@ -113,6 +114,7 @@ export function useMeasurementPersistence({
 
     hasTriggeredForSessionRef.current = false;
     isWritingFinalRef.current = false;
+    consecutiveDropsRef.current = 0;
     rollingWindowRef.current = [];
     setScreeningState('IDLE');
     setWindowSamplesCount(0);
@@ -224,15 +226,15 @@ export function useMeasurementPersistence({
     const left = pupilData.leftPupil;
     const right = pupilData.rightPupil;
 
-    // Strict validation: both left & right must be DETECTED with finite positive numbers
+    // Robust validation: pupil is valid if detected/uncertain with finite positive diameter
     const isLeftValid =
-      left.status === 'DETECTED' &&
+      (left.status === 'DETECTED' || left.status === 'UNCERTAIN') &&
       typeof left.diameterPx === 'number' &&
       Number.isFinite(left.diameterPx) &&
       left.diameterPx > 0;
 
     const isRightValid =
-      right.status === 'DETECTED' &&
+      (right.status === 'DETECTED' || right.status === 'UNCERTAIN') &&
       typeof right.diameterPx === 'number' &&
       Number.isFinite(right.diameterPx) &&
       right.diameterPx > 0;
@@ -240,6 +242,7 @@ export function useMeasurementPersistence({
     const isCurrentlyBilateralDetected = isLeftValid && isRightValid;
 
     if (isCurrentlyBilateralDetected) {
+      consecutiveDropsRef.current = 0;
       const currentLeftPx = left.diameterPx!;
       const currentRightPx = right.diameterPx!;
       const now = performance.now();
@@ -351,8 +354,9 @@ export function useMeasurementPersistence({
         setIsBaselineStable(false);
       }
     } else {
-      // Detection is lost or degraded
-      if (!hasTriggeredForSessionRef.current) {
+      // Detection is temporarily lost or degraded (tolerate 4 frames of micro-blinks)
+      consecutiveDropsRef.current++;
+      if (!hasTriggeredForSessionRef.current && consecutiveDropsRef.current > 4) {
         rollingWindowRef.current = [];
         setWindowSamplesCount(0);
         setLeftDeltaPx(0);

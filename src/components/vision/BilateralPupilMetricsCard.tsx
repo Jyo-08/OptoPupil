@@ -35,9 +35,20 @@ export const BilateralPupilMetricsCard: React.FC<BilateralPupilMetricsCardProps>
           </div>
           <div className="mt-2.5 flex items-baseline justify-between">
             <span className="text-[11px] font-mono text-slate-400">DIAMETER:</span>
-            <span className="font-mono text-base font-bold text-purple-300">
-              {leftPupil.diameterPx ? `${leftPupil.diameterPx.toFixed(1)} px` : '—'}
-            </span>
+            <div className="flex items-baseline gap-1.5">
+              <span className="font-mono text-base font-bold text-purple-300">
+                {leftPupil.diameterMm
+                  ? `${leftPupil.diameterMm.toFixed(2)} mm`
+                  : leftPupil.diameterPx
+                  ? `${leftPupil.diameterPx.toFixed(1)} px`
+                  : '—'}
+              </span>
+              {leftPupil.diameterMm && leftPupil.diameterPx && (
+                <span className="text-[10px] font-mono text-slate-400">
+                  ({leftPupil.diameterPx.toFixed(1)} px)
+                </span>
+              )}
+            </div>
           </div>
           {leftPupil.majorAxisPx && leftPupil.minorAxisPx && (
             <div className="mt-1 flex items-center justify-between text-[10px] font-mono text-slate-400">
@@ -61,9 +72,20 @@ export const BilateralPupilMetricsCard: React.FC<BilateralPupilMetricsCardProps>
           </div>
           <div className="mt-2.5 flex items-baseline justify-between">
             <span className="text-[11px] font-mono text-slate-400">DIAMETER:</span>
-            <span className="font-mono text-base font-bold text-purple-300">
-              {rightPupil.diameterPx ? `${rightPupil.diameterPx.toFixed(1)} px` : '—'}
-            </span>
+            <div className="flex items-baseline gap-1.5">
+              <span className="font-mono text-base font-bold text-purple-300">
+                {rightPupil.diameterMm
+                  ? `${rightPupil.diameterMm.toFixed(2)} mm`
+                  : rightPupil.diameterPx
+                  ? `${rightPupil.diameterPx.toFixed(1)} px`
+                  : '—'}
+              </span>
+              {rightPupil.diameterMm && rightPupil.diameterPx && (
+                <span className="text-[10px] font-mono text-slate-400">
+                  ({rightPupil.diameterPx.toFixed(1)} px)
+                </span>
+              )}
+            </div>
           </div>
           {rightPupil.majorAxisPx && rightPupil.minorAxisPx && (
             <div className="mt-1 flex items-center justify-between text-[10px] font-mono text-slate-400">
@@ -79,6 +101,22 @@ export const BilateralPupilMetricsCard: React.FC<BilateralPupilMetricsCardProps>
           )}
         </div>
       </div>
+
+      {/* Bilateral Eye Matching & Symmetry Indicator */}
+      {leftPupil.diameterMm && rightPupil.diameterMm ? (
+        <div className="mt-3 flex items-center justify-between rounded-lg border border-slate-800/80 bg-slate-900/40 px-3 py-2 text-[11px] font-mono">
+          <span className="text-slate-400">BILATERAL SYMMETRY:</span>
+          {(() => {
+            const diffMm = Math.abs(leftPupil.diameterMm! - rightPupil.diameterMm!);
+            const isSymmetric = diffMm < 0.4;
+            return (
+              <span className={`font-semibold ${isSymmetric ? 'text-emerald-400' : 'text-amber-400'}`}>
+                {isSymmetric ? 'SYMMETRIC' : 'ASYMMETRY'} (&Delta; {diffMm.toFixed(2)} mm)
+              </span>
+            );
+          })()}
+        </div>
+      ) : null}
     </div>
   );
 };
