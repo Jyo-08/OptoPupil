@@ -31,5 +31,12 @@ dist-ssr
 .claude-flow/logs/
 .claude-flow/sessions/
 
-# Machine Learning Local Data
+# Machine Learning Local Data & Virtual Environments
 ml/data/
+ml/models/*.pth
+ml/models/*.pt
+.venv-ml/
+.venv/
+venv/
+*.pyc
+__pycache__/
