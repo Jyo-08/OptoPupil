@@ -1,8 +1,10 @@
 import React, { useRef, useEffect } from 'react';
 import { useCamera } from '../camera/useCamera';
 import { useVisionPipeline } from '../hooks/useVisionPipeline';
+import { useMeasurementPersistence } from '../hooks/useMeasurementPersistence';
 import { CameraView } from '../components/vision/CameraView';
 import { TrackingPanel } from '../components/vision/TrackingPanel';
+import { LatestMeasurementCard } from '../components/dashboard/LatestMeasurementCard';
 import {
   useDisplayStimulus,
   DisplayStimulusOverlay,
@@ -40,6 +42,19 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
   } = useVisionPipeline({
     videoRef,
     canvasRef,
+    isActive: cameraState.status === 'active',
+  });
+
+  // Edge-triggered measurement persistence to IndexedDB
+  const {
+    latestMeasurement,
+    totalCount,
+    isSaving,
+    persistenceError,
+    refresh,
+    clearHistory,
+  } = useMeasurementPersistence({
+    pupilData,
     isActive: cameraState.status === 'active',
   });
 
@@ -144,8 +159,17 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
           </div>
         </div>
 
-        {/* Right / Bottom: Light Stimulus Controller & Pupil Metrics (4 cols) */}
+        {/* Right / Bottom: Light Stimulus, Persisted Measurement & Pupil Metrics (4 cols) */}
         <div className="lg:col-span-4 flex flex-col gap-4">
+          <LatestMeasurementCard
+            latestMeasurement={latestMeasurement}
+            totalCount={totalCount}
+            isSaving={isSaving}
+            persistenceError={persistenceError}
+            onRefresh={refresh}
+            onClear={clearHistory}
+          />
+
           <StimulusControlCard
             isStimulusActive={isStimulusActive}
             onStartStimulus={() => startStimulus()}
