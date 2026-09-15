@@ -1,7 +1,7 @@
-# OptoPupil ML Workstream — Phase 2A: Dataset Preprocessing & Geometry Preservation
+# OptoPupil ML Workstream
 
 ## 1. Overview
-This directory houses the machine learning data pipeline, dataset cleaning audit, preprocessing transformations, PyTorch-compatible dataset loaders, and geometry verification tooling for the **OptoPupil** neural pupil segmentation workstream.
+This directory houses the end-to-end machine learning data pipeline, dataset cleaning audit, preprocessing transformations, PyTorch-compatible dataset loaders, neural model architecture, and modular loss functions for the **OptoPupil** neural pupil segmentation workstream.
 
 ---
 
@@ -9,14 +9,18 @@ This directory houses the machine learning data pipeline, dataset cleaning audit
 
 ```
 ml/
-├── preprocessing_config.py      # Dataclass defining resolution matrices, interpolation, normalization, and augmentations
-├── dataset.py                   # PyTorch-compatible Dataset loader with strict integer mask & aspect-ratio guarantees
+├── model_config.py              # Architecture hyperparameters, tensor shapes, and loss weight configs
+├── model.py                     # OptoPupilUNet lightweight segmentation model architecture
+├── losses.py                    # Multiclass Dice, Weighted Cross-Entropy, and CombinedPupilLoss
+├── test_model.py                # Forward-pass, parameter inspection, and loss validation runner
+├── dataset.py                   # PyTorch Dataset loader with strict integer mask & aspect-ratio guarantees
+├── preprocessing_config.py      # Preprocessing configuration (256x192, bilinear/nearest-neighbor)
 ├── preprocess_dataset.py        # Preprocessing pipeline runner, geometry verification & report generator
 ├── clean_dataset.py             # Phase 1 dataset cleaning & quality audit pipeline
 ├── validate_dataset.py          # Independent dataset integrity validator
 ├── inspect_dataset.py           # Dataset visual inspection utility
 ├── data/
-│   └── cleaned/                 # Verified cleaned dataset (Original source preserved untouched)
+│   └── cleaned/                 # Verified cleaned dataset (1,000 train + 275 val pairs)
 │       ├── train/
 │       │   ├── image/           # 1,000 Grayscale PNGs (640×480)
 │       │   └── segmentation/    # 1,000 Single-channel integer masks (Classes 0, 1, 2, 3)
@@ -24,89 +28,130 @@ ml/
 │           ├── image/           # 275 Grayscale PNGs (640×480)
 │           └── segmentation/    # 275 Single-channel integer masks (Classes 0, 1, 2, 3)
 └── reports/
-    ├── preprocessing_report.md  # 15-section comprehensive preprocessing & geometry report
-    ├── preprocessing_samples/   # High-resolution multi-panel before/after visualizations
-    │   ├── preprocessing_montage_summary.png
-    │   ├── sample_small_pupil_(constricted).png
-    │   ├── sample_medium_pupil_(baseline).png
-    │   ├── sample_large_pupil_(dilated).png
-    │   ├── sample_boundary-near_pupil.png
-    │   └── sample_unusual_pupil_iris_ratio.png
+    ├── preprocessing_report.md  # 15-section preprocessing & geometry preservation report
+    ├── preprocessing_samples/   # Multi-panel before/after visualizations
     ├── dataset_cleaning_report.md
     └── dataset_cleaning_report.json
 ```
 
 ---
 
-## 3. Preprocessing Specifications
+## 3. Model Architecture (`OptoPupilUNet`)
 
-| Component | Specification | Rationale |
-| :--- | :--- | :--- |
-| **Target Resolution** | **$256 \times 192$** ($W \times H$) | Preserves exact $4:3$ aspect ratio ($640 \times 480 \rightarrow 256 \times 192$ with $0.40\times$ uniform scaling, 0 padding, divisible by 32 for U-Net) |
-| **Image Interpolation** | `Bilinear` (`PIL.Image.Resampling.BILINEAR`) | Smooth gradient transitions and sub-pixel edge preservation |
-| **Mask Interpolation** | Strictly `Nearest-Neighbor` (`PIL.Image.Resampling.NEAREST`) | Strictly preserves discrete integer class labels $\{0, 1, 2, 3\}$ without fractional blurring |
-| **Image Normalization** | Min-Max $[0.0, 1.0]$ `float32` (`pixel / 255.0`) | Standardized bounded neural input dynamic range |
-| **Mask Format** | Single-channel 2D `int64` matrix `[192, 256]` | Direct compatibility with PyTorch `CrossEntropyLoss` and `DiceLoss` |
-| **ROI Strategy** | Full-frame retention ($256 \times 192$) | Source captures are already tightly cropped ocular regions; full frame avoids truncating off-center pupils |
-| **Augmentation** | Dynamic on-the-fly (Rotation $\pm 5^\circ$, Shift $\pm 4\%$, Noise $\sigma=0.015$, Brightness/Contrast $\pm 8\%$) | Applied during training `__getitem__`; raw files remain unmodified |
+`OptoPupilUNet` is a lightweight, encoder-decoder convolutional network tailored for real-time ocular image segmentation and pupil aperture localization on mobile devices, developer machines, and browser WASM/WebGPU runtimes.
+
+### Architectural Layout:
+- **Input Tensor**: `[B, 1, 192, 256]` (Single-channel grayscale, normalized $[0.0, 1.0]$ Float32).
+- **Encoder (Contracting Path)**:
+  - `inc`: DoubleConv ($1 \rightarrow 32$), output `[B, 32, 192, 256]` $\rightarrow$ Skip Connection 1
+  - `down1`: MaxPool2d ($2\times 2$) + DoubleConv ($32 \rightarrow 64$), output `[B, 64, 96, 128]` $\rightarrow$ Skip Connection 2
+  - `down2`: MaxPool2d ($2\times 2$) + DoubleConv ($64 \rightarrow 128$), output `[B, 128, 48, 64]` $\rightarrow$ Skip Connection 3
+  - `down3`: MaxPool2d ($2\times 2$) + DoubleConv ($128 \rightarrow 256$), output `[B, 256, 24, 32]` $\rightarrow$ Skip Connection 4
+- **Bottleneck**:
+  - `down4`: MaxPool2d ($2\times 2$) + DoubleConv ($256 \rightarrow 256$), output `[B, 256, 12, 16]`
+- **Decoder (Expanding Path with Skip Connections)**:
+  - `up1`: Bilinear Upsample ($2\times$) + Concat Skip 4 + DoubleConv ($512 \rightarrow 128$), output `[B, 128, 24, 32]`
+  - `up2`: Bilinear Upsample ($2\times$) + Concat Skip 3 + DoubleConv ($256 \rightarrow 64$), output `[B, 64, 48, 64]`
+  - `up3`: Bilinear Upsample ($2\times$) + Concat Skip 2 + DoubleConv ($128 \rightarrow 32$), output `[B, 32, 96, 128]`
+  - `up4`: Bilinear Upsample ($2\times$) + Concat Skip 1 + DoubleConv ($64 \rightarrow 32$), output `[B, 32, 192, 256]`
+- **Segmentation Head**:
+  - `outc`: $1\times 1$ Conv ($32 \rightarrow 4$), output `[B, 4, 192, 256]` (Raw unnormalized logits).
+
+### Parameter Footprint:
+- **Total Parameters**: `1,930,212` (~1.93M parameters)
+- **Trainable Parameters**: `1,930,212` (100%)
+- **Model Size in Memory**: `7.36 MB` (Float32)
+- **Complexity Assessment**: Lightweight, fully within the $<5\text{M}$ constraint for embedded and browser inference.
 
 ---
 
-## 4. Class Encoding & Statistics
+## 4. Class Mapping & Anatomical Roles
 
-| Class | Anatomical Structure | Cleaned Combined Pixels | Percentage | Role in Training |
+| Class Index | Anatomical Structure | Cleaned Dataset Share | Normalized Class Weight ($w_c$) | Role in Pupillometry |
 | :--- | :--- | :--- | :--- | :--- |
-| **`0`** | **Background / Periocular Skin** | 265,120,742 px | 67.69% | Background non-eye region |
-| **`1`** | **Sclera / Exposed Eye** | 70,463,758 px | 17.99% | Ocular landmark |
-| **`2`** | **Pupil Aperture** | **18,951,817 px** | **4.84%** | **Primary Segmentation Target** |
-| **`3`** | **Iris Stroma** | 37,143,683 px | 9.48% | Concentric pupil boundary context |
-
-### Pupil Area Percentiles (Ground Truth $640 \times 480$):
-- **Min**: $0\text{ px}$ (4 fully occluded/blinking samples in train)
-- **P1**: $2,979\text{ px}$ (~$477\text{ px}$ in $256 \times 192$)
-- **P25 (Q1)**: $10,814\text{ px}$ (~$1,730\text{ px}$ in $256 \times 192$)
-- **P50 (Median)**: $14,272\text{ px}$ (~$2,284\text{ px}$ in $256 \times 192$)
-- **P75 (Q3)**: $17,954\text{ px}$ (~$2,873\text{ px}$ in $256 \times 192$)
-- **P99**: $33,073\text{ px}$ (~$5,292\text{ px}$ in $256 \times 192$)
-- **Max**: $50,473\text{ px}$ (~$8,076\text{ px}$ in $256 \times 192$)
+| **`0`** | **Background / Periocular Skin** | 67.69% | `0.427` | Non-ocular periocular context |
+| **`1`** | **Sclera / Exposed Eye** | 17.99% | `0.840` | Ocular boundary landmark |
+| **`2`** | **Pupil Aperture (Target)** | **4.84%** | **`1.597` (Boosted $\times 2.0$)** | **Primary target for diameter & PLR metrics** |
+| **`3`** | **Iris Stroma** | 9.48% | `1.139` | Concentric pupil boundary limiter |
 
 ---
 
-## 5. Geometric Preservation Sanity Test
+## 5. Loss Design: Why Pupil Imbalance Matters
 
-All 5 representative sample categories passed strict geometric consistency tests ($Area_{prep} \approx 0.1600 \times Area_{orig}$, $AR_{err} < 0.05$, $Centroid_{err} < 1.0\text{px}$):
-1. **Small Pupil (Constricted)** (`0236_2_1_2_22_003.png`): Area $2389 \rightarrow 388\text{ px}$ ($0.1624$), Aspect ratio error $0.0116$ — **PASS**
-2. **Medium Pupil (Baseline)** (`0230_2_1_2_23_005.png`): Area $14553 \rightarrow 2333\text{ px}$ ($0.1603$), Aspect ratio error $0.0065$ — **PASS**
-3. **Large Pupil (Dilated)** (`0246_1_1_2_21_003.png`): Area $36898 \rightarrow 5900\text{ px}$ ($0.1599$), Aspect ratio error $0.0022$ — **PASS**
-4. **Boundary-Near Pupil** (`0227_1_1_2_32_000.png`): Area $17601 \rightarrow 2817\text{ px}$ ($0.1600$), Aspect ratio error $0.0029$ — **PASS**
-5. **Unusual Pupil/Iris Ratio** (`0270_1_1_2_42_004.png`): Area $10969 \rightarrow 1765\text{ px}$ ($0.1609$), Aspect ratio error $0.0441$ — **PASS**
+In raw full-frame ocular images, the pupil aperture occupies only **$\sim 4.8\%$** of total pixels. If an unweighted Cross-Entropy loss is used, a naive model predicting only background (`class 0`) achieves $>67\%$ pixel accuracy despite completely failing to detect the pupil aperture.
+
+To prevent this degeneracy, we implement a **Modular Compound Loss** in `ml/losses.py`:
+
+$$\mathcal{L}_{\text{total}} = \alpha \cdot \mathcal{L}_{\text{WeightedCE}} + \beta \cdot \mathcal{L}_{\text{MulticlassDice}}$$
+
+1. **Weighted Cross-Entropy ($\mathcal{L}_{\text{WeightedCE}}$)**:
+   Penalizes pixel-level misclassifications according to inverse square-root frequencies:
+   $$w_c = \frac{1}{\sqrt{f_c}} \cdot \frac{C}{\sum_i 1/\sqrt{f_i}}$$
+2. **Multiclass Dice Loss ($\mathcal{L}_{\text{MulticlassDice}}$)**:
+   Measures spatial overlap (IoU/F1-score) directly on one-hot probability maps, making the gradient independent of class area size:
+   $$\text{Dice}_c = \frac{2 \sum p_{c} y_{c} + \epsilon}{\sum p_{c} + \sum y_{c} + \epsilon}$$
+3. **Pupil Class Boost ($\times 2.0$)**:
+   Applies an extra multiplier to class 2 (Pupil) inside the Dice loss component.
 
 ---
 
-## 6. How to Run
+## 6. How to Run Model Validation
 
-### Run Preprocessing Pipeline & Regenerate Reports:
+Run the forward-pass, parameter inspection, and loss computation test:
+
 ```bash
-python3 ml/preprocess_dataset.py
+python3 ml/test_model.py
 ```
 
-### Dataset Loader Usage (PyTorch):
-```python
-from ml.dataset import OptoPupilDataset
-from ml.preprocessing_config import DEFAULT_CONFIG
+### Expected Output:
+```text
+============================================================
+MODEL ARCHITECTURE TEST
+============================================================
 
-# Instantiate dataset
-train_dataset = OptoPupilDataset(split="train", config=DEFAULT_CONFIG, augment=True)
-val_dataset   = OptoPupilDataset(split="val",   config=DEFAULT_CONFIG, augment=False)
+Input:
+[1, 1, 192, 256]
 
-# Access sample: image shape [1, 192, 256] float32, mask shape [192, 256] int64
-image, mask = train_dataset[0]
-print(f"Image tensor shape: {image.shape}, dtype: {image.dtype}")  # [1, 192, 256], torch.float32
-print(f"Mask tensor shape:  {mask.shape},  dtype: {mask.dtype}")   # [192, 256],    torch.int64
+Output:
+[1, 4, 192, 256]
+
+Ground truth:
+[1, 192, 256]
+
+Predicted classes:
+0–3
+
+Parameters:
+1,930,212 (7.36 MB)
+
+Device:
+CPU (NumPy Engine) (99.63 ms)
+
+Loss:
+2.4602 (CE: 1.5911, Dice: 0.8691)
+
+NaN:
+0
+
+Inf:
+0
+
+Forward pass:
+PASS
+
+Loss computation:
+PASS
+
+Prediction shape:
+PASS
+
+Status:
+READY FOR TRAINING
+============================================================
 ```
 
 ---
 
-## 7. Next Stage: Model Architecture (Phase 2B)
-The preprocessing pipeline is **READY FOR MODEL ARCHITECTURE**.
-The next stage will design a lightweight U-Net / MobileNetV3 segmentation network optimized for high-fps inference and class-2 pupil extraction.
+## 7. Next Stage: Model Training Pipeline (Phase 3)
+The model architecture and compound loss functions are **READY FOR TRAINING**.
+Phase 3 will configure the training loop, learning rate scheduling (Cosine Annealing / OneCycleLR), validation metric logging (Pupil Dice & IoU), and early stopping.
