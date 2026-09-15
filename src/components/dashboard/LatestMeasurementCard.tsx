@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { PupilMeasurementRecord } from '../../db/types';
 import type { ScreeningWorkflowState } from '../../hooks/useMeasurementPersistence';
+import { STABILITY_WINDOW_SIZE, STABILITY_TOLERANCE_PX } from '../../stimulus/config';
 import { StatusBadge } from '../common/StatusBadge';
 import {
   Database,
@@ -15,6 +16,7 @@ import {
   ChevronDown,
   ChevronUp,
   Zap,
+  Activity,
 } from 'lucide-react';
 
 interface LatestMeasurementCardProps {
@@ -24,7 +26,10 @@ interface LatestMeasurementCardProps {
   isSaving: boolean;
   persistenceError: string | null;
   screeningState?: ScreeningWorkflowState;
-  stabilityProgress?: number;
+  windowSamplesCount?: number;
+  leftDeltaPx?: number;
+  rightDeltaPx?: number;
+  isBaselineStable?: boolean;
   onRefresh?: () => void;
   onClear?: () => void;
 }
@@ -36,7 +41,10 @@ export const LatestMeasurementCard: React.FC<LatestMeasurementCardProps> = ({
   isSaving,
   persistenceError,
   screeningState = 'IDLE',
-  stabilityProgress = 0,
+  windowSamplesCount = 0,
+  leftDeltaPx = 0,
+  rightDeltaPx = 0,
+  isBaselineStable = false,
   onRefresh,
   onClear,
 }) => {
@@ -122,7 +130,7 @@ export const LatestMeasurementCard: React.FC<LatestMeasurementCardProps> = ({
         <div className="flex items-center gap-2">
           <Database className="h-4 w-4 text-cyan-400" />
           <span className="text-xs font-semibold tracking-wider text-slate-200 uppercase">
-            Screening &amp; Persisted DB
+            Baseline &amp; Persisted DB
           </span>
         </div>
         <div className="flex items-center gap-2 text-[10px]">
@@ -140,37 +148,37 @@ export const LatestMeasurementCard: React.FC<LatestMeasurementCardProps> = ({
         </div>
       </div>
 
-      {/* Screening Workflow Status Banner */}
+      {/* Baseline Stability & Screening Workflow Status */}
       <div className="mt-3">
-        {screeningState === 'DETECTING' && (
+        {screeningState === 'COLLECTING_BASELINE' && (
           <div className="rounded-lg border border-cyan-600/40 bg-cyan-950/30 p-2.5">
-            <div className="flex items-center justify-between text-[11px] text-cyan-300 font-bold mb-1.5">
+            <div className="flex items-center justify-between text-[11px] text-cyan-300 font-bold mb-1">
               <span className="flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
-                STABILIZING BILATERAL DETECTION...
+                <Activity className="h-3.5 w-3.5 text-cyan-400 animate-pulse" />
+                EVALUATING BASELINE STABILITY...
               </span>
-              <span>{stabilityProgress}%</span>
+              <span>{windowSamplesCount}/{STABILITY_WINDOW_SIZE} SAMPLES</span>
             </div>
-            <div className="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
-              <div
-                className="h-full bg-cyan-400 transition-all duration-100 ease-out"
-                style={{ width: `${stabilityProgress}%` }}
-              />
+            <div className="flex items-center justify-between text-[10px] text-slate-400">
+              <span>L: Δ{leftDeltaPx.toFixed(2)}px | R: Δ{rightDeltaPx.toFixed(2)}px</span>
+              <span className={isBaselineStable ? 'text-emerald-400 font-bold' : 'text-amber-400'}>
+                {isBaselineStable ? 'BASELINE STABLE' : `TOL: ≤${STABILITY_TOLERANCE_PX}px`}
+              </span>
             </div>
           </div>
         )}
 
         {screeningState === 'STIMULUS_ACTIVE' && (
-          <div className="rounded-lg border border-amber-500/50 bg-amber-950/40 p-2 text-center text-amber-300 font-bold flex items-center justify-center gap-2 animate-pulse">
+          <div className="rounded-lg border border-amber-500/50 bg-amber-950/40 p-2.5 text-center text-amber-300 font-bold flex items-center justify-center gap-2 animate-pulse">
             <Zap className="h-4 w-4 text-amber-400" />
-            <span>LIGHT STIMULUS ACTIVE (500 ms)</span>
+            <span>STIMULUS TRIGGERED — ONSET MEASUREMENT CAPTURED</span>
           </div>
         )}
 
         {screeningState === 'PERSISTED' && (
           <div className="rounded-lg border border-emerald-600/40 bg-emerald-950/30 p-2 text-center text-emerald-300 font-semibold flex items-center justify-center gap-1.5">
             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-            <span>SCREENING COMPLETE — RECORD PERSISTED</span>
+            <span>SCREENING COMPLETE — DISTINCT RECORD STORED</span>
           </div>
         )}
       </div>
@@ -193,7 +201,7 @@ export const LatestMeasurementCard: React.FC<LatestMeasurementCardProps> = ({
           <div className="grid grid-cols-2 gap-2.5">
             {/* Left Pupil */}
             <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2.5">
-              <div className="text-[10px] text-slate-400">LEFT PUPIL</div>
+              <div className="text-[10px] text-slate-400">LEFT PUPIL (ONSET)</div>
               <div className="mt-1 text-base font-bold text-purple-300">
                 {latestMeasurement.left_pupil_px.toFixed(1)} px
               </div>
@@ -201,14 +209,14 @@ export const LatestMeasurementCard: React.FC<LatestMeasurementCardProps> = ({
 
             {/* Right Pupil */}
             <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-2.5">
-              <div className="text-[10px] text-slate-400">RIGHT PUPIL</div>
+              <div className="text-[10px] text-slate-400">RIGHT PUPIL (ONSET)</div>
               <div className="mt-1 text-base font-bold text-purple-300">
                 {latestMeasurement.right_pupil_px.toFixed(1)} px
               </div>
             </div>
           </div>
 
-          {/* Metadata Row: Captured Time & Status */}
+          {/* Metadata Row: Captured Time, Status & Stimulus Onset */}
           <div className="space-y-2 rounded-lg border border-slate-800/80 bg-slate-900/40 p-2.5">
             <div className="flex items-center justify-between text-slate-300">
               <span className="text-slate-400 flex items-center gap-1.5">
@@ -225,22 +233,13 @@ export const LatestMeasurementCard: React.FC<LatestMeasurementCardProps> = ({
               <StatusBadge status={latestMeasurement.status} size="sm" />
             </div>
 
-            {latestMeasurement.stimulus_duration_ms && (
-              <div className="flex items-center justify-between text-[10px] text-amber-300/90">
-                <span className="text-slate-400">STIMULUS DURATION:</span>
-                <span>{latestMeasurement.stimulus_duration_ms.toFixed(1)} ms</span>
-              </div>
-            )}
-
-            {latestMeasurement.id && (
-              <div className="flex items-center justify-between text-[10px] text-slate-500 border-t border-slate-800/60 pt-1.5">
-                <span>LATEST RECORD ID: #{latestMeasurement.id}</span>
-                <span className="flex items-center gap-1 text-emerald-400">
-                  <CheckCircle2 className="h-3 w-3" />
-                  IMMUTABLE
-                </span>
-              </div>
-            )}
+            <div className="flex items-center justify-between text-[10px] text-slate-500 border-t border-slate-800/60 pt-1.5">
+              <span>RECORD ID: #{latestMeasurement.id}</span>
+              <span className="flex items-center gap-1 text-amber-300 font-semibold">
+                <Zap className="h-3 w-3 text-amber-400" />
+                STIMULUS ONSET
+              </span>
+            </div>
           </div>
 
           {/* Expandable Historical Log */}
@@ -310,9 +309,9 @@ export const LatestMeasurementCard: React.FC<LatestMeasurementCardProps> = ({
       ) : (
         <div className="mt-3 rounded-lg border border-slate-800/60 bg-slate-900/30 p-4 text-center text-slate-500">
           <Database className="mx-auto h-5 w-5 opacity-40 mb-1.5" />
-          <p className="text-[11px]">Awaiting stable bilateral detection...</p>
+          <p className="text-[11px]">Awaiting stable bilateral baseline...</p>
           <p className="text-[10px] text-slate-600 mt-0.5">
-            Hold gaze steady for 1.0s to trigger light stimulus and capture measurement
+            Collects 6 valid bilateral frames stable within ±0.5 px to trigger stimulus &amp; capture
           </p>
         </div>
       )}

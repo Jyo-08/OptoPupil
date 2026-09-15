@@ -3,12 +3,16 @@ import type { BilateralPupilData } from '../types/vision';
 import { pupilDatabase } from '../db/pupilDatabase';
 import type { PupilMeasurementRecord } from '../db/types';
 import type { StimulusTiming } from '../stimulus/types';
-import { STABLE_DETECTION_MS, STIMULUS_DURATION_MS } from '../stimulus/config';
+import {
+  STABILITY_WINDOW_SIZE,
+  STABILITY_TOLERANCE_PX,
+  STIMULUS_DURATION_MS,
+} from '../stimulus/config';
 
 export type ScreeningWorkflowState =
   | 'IDLE'
-  | 'DETECTING'
-  | 'STABLE'
+  | 'COLLECTING_BASELINE'
+  | 'BASELINE_STABLE'
   | 'STIMULUS_ACTIVE'
   | 'PERSISTED';
 
@@ -29,10 +33,16 @@ export interface UseMeasurementPersistenceReturn {
   isSaving: boolean;
   /** Any error encountered during persistence */
   persistenceError: string | null;
-  /** Current state of the automated screening workflow state machine */
+  /** Current state of the automated screening workflow */
   screeningState: ScreeningWorkflowState;
-  /** Progress percentage towards stability trigger (0 to 100) */
-  stabilityProgress: number;
+  /** Number of valid samples in the current rolling window (0 to STABILITY_WINDOW_SIZE) */
+  windowSamplesCount: number;
+  /** Current fluctuation delta (max - min) in pixels for left eye */
+  leftDeltaPx: number;
+  /** Current fluctuation delta (max - min) in pixels for right eye */
+  rightDeltaPx: number;
+  /** Whether current bilateral baseline satisfies the stability tolerance (<= 0.5 px) */
+  isBaselineStable: boolean;
   /** Manual refresh trigger for database records */
   refresh: () => Promise<void>;
   /** Clear all persisted records */
@@ -41,6 +51,11 @@ export interface UseMeasurementPersistenceReturn {
 
 // Minimum consecutive lost frames required to officially reset the completed screening session
 const LOST_FRAMES_COOLDOWN = 10;
+
+interface PupilSample {
+  left: number;
+  right: number;
+}
 
 export function useMeasurementPersistence({
   pupilData,
@@ -52,24 +67,19 @@ export function useMeasurementPersistence({
   const [totalCount, setTotalCount] = useState<number>(0);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
-  const [screeningState, setScreeningState] = useState<ScreeningWorkflowState>('IDLE');
-  const [stabilityProgress, setStabilityProgress] = useState<number>(0);
 
-  // Workflow state refs to avoid closure staleness in rapid animation frames
-  const stateRef = useRef<ScreeningWorkflowState>('IDLE');
-  const detectionStartTimeRef = useRef<number | null>(null);
+  const [screeningState, setScreeningState] = useState<ScreeningWorkflowState>('IDLE');
+  const [windowSamplesCount, setWindowSamplesCount] = useState<number>(0);
+  const [leftDeltaPx, setLeftDeltaPx] = useState<number>(0);
+  const [rightDeltaPx, setRightDeltaPx] = useState<number>(0);
+  const [isBaselineStable, setIsBaselineStable] = useState<boolean>(false);
+
+  // In-memory rolling window of recent valid bilateral measurements
+  const rollingWindowRef = useRef<PupilSample[]>([]);
+  // Session lock to ensure exactly ONE stimulus trigger and ONE database record per screening event
+  const hasTriggeredForSessionRef = useRef<boolean>(false);
   const lostFramesCountRef = useRef<number>(0);
   const isWritingRef = useRef<boolean>(false);
-  const stabilityTimerRef = useRef<number | null>(null);
-  const pupilDataRef = useRef<BilateralPupilData>(pupilData);
-
-  // Keep latest pupil data reference available for stimulus completion callback
-  pupilDataRef.current = pupilData;
-
-  const setWorkflowState = useCallback((nextState: ScreeningWorkflowState) => {
-    stateRef.current = nextState;
-    setScreeningState(nextState);
-  }, []);
 
   // Fetch all historical database records and update state
   const refresh = useCallback(async () => {
@@ -95,15 +105,19 @@ export function useMeasurementPersistence({
       setRecentRecords([]);
       setTotalCount(0);
       setPersistenceError(null);
-      setWorkflowState('IDLE');
-      setStabilityProgress(0);
-      detectionStartTimeRef.current = null;
+      hasTriggeredForSessionRef.current = false;
+      rollingWindowRef.current = [];
       lostFramesCountRef.current = 0;
+      setScreeningState('IDLE');
+      setWindowSamplesCount(0);
+      setLeftDeltaPx(0);
+      setRightDeltaPx(0);
+      setIsBaselineStable(false);
     } catch (err: any) {
       console.error('OptoPupil DB: Failed to clear measurements:', err);
       setPersistenceError(err?.message || 'Database clear error');
     }
-  }, [setWorkflowState]);
+  }, []);
 
   // Subscribe to database change events
   useEffect(() => {
@@ -123,18 +137,18 @@ export function useMeasurementPersistence({
     };
   }, [refresh]);
 
-  // Automated Screening Event Workflow State Machine
+  // Rolling Baseline Stability & Stimulus Trigger Loop
   useEffect(() => {
     // If camera feed is stopped or inactive, reset workflow immediately
     if (!isActive) {
-      if (stabilityTimerRef.current !== null) {
-        window.clearTimeout(stabilityTimerRef.current);
-        stabilityTimerRef.current = null;
-      }
-      setWorkflowState('IDLE');
-      setStabilityProgress(0);
-      detectionStartTimeRef.current = null;
+      hasTriggeredForSessionRef.current = false;
+      rollingWindowRef.current = [];
       lostFramesCountRef.current = 0;
+      setScreeningState('IDLE');
+      setWindowSamplesCount(0);
+      setLeftDeltaPx(0);
+      setRightDeltaPx(0);
+      setIsBaselineStable(false);
       return;
     }
 
@@ -159,120 +173,116 @@ export function useMeasurementPersistence({
     if (isCurrentlyBilateralDetected) {
       lostFramesCountRef.current = 0;
 
-      // State 1: Transition IDLE -> DETECTING (start stability measurement)
-      if (stateRef.current === 'IDLE') {
-        const now = performance.now();
-        detectionStartTimeRef.current = now;
-        setWorkflowState('DETECTING');
-        setStabilityProgress(0);
+      const currentLeftPx = left.diameterPx!;
+      const currentRightPx = right.diameterPx!;
 
-        // Schedule stimulus trigger when STABLE_DETECTION_MS is reached
-        if (stabilityTimerRef.current !== null) {
-          window.clearTimeout(stabilityTimerRef.current);
-        }
-
-        stabilityTimerRef.current = window.setTimeout(() => {
-          // Confirm state is still detecting before launching stimulus
-          if (stateRef.current === 'DETECTING') {
-            setWorkflowState('STABLE');
-            setStabilityProgress(100);
-
-            // Transition STABLE -> STIMULUS_ACTIVE
-            setWorkflowState('STIMULUS_ACTIVE');
-
-            startStimulus(STIMULUS_DURATION_MS, (stimulusTiming: StimulusTiming) => {
-              // On stimulus offset: CAPTURE & PERSIST measurement
-              const currentLeft = pupilDataRef.current.leftPupil;
-              const currentRight = pupilDataRef.current.rightPupil;
-
-              const canCapture =
-                typeof currentLeft.diameterPx === 'number' &&
-                Number.isFinite(currentLeft.diameterPx) &&
-                currentLeft.diameterPx > 0 &&
-                typeof currentRight.diameterPx === 'number' &&
-                Number.isFinite(currentRight.diameterPx) &&
-                currentRight.diameterPx > 0;
-
-              if (canCapture && !isWritingRef.current) {
-                isWritingRef.current = true;
-                setIsSaving(true);
-
-                const leftPx = Number(currentLeft.diameterPx!.toFixed(2));
-                const rightPx = Number(currentRight.diameterPx!.toFixed(2));
-                const timestamp = new Date().toISOString();
-
-                const record: Omit<PupilMeasurementRecord, 'id'> = {
-                  timestamp,
-                  left_pupil_px: leftPx,
-                  right_pupil_px: rightPx,
-                  status: 'DETECTED',
-                  perf_timestamp_ms: performance.now(),
-                  stimulus_onset_ms: stimulusTiming.stimulusOnsetTime,
-                  stimulus_offset_ms: stimulusTiming.stimulusOffsetTime,
-                  stimulus_duration_ms: stimulusTiming.actualDurationMs,
-                };
-
-                pupilDatabase
-                  .savePupilMeasurement(record)
-                  .then(() => {
-                    setPersistenceError(null);
-                    setWorkflowState('PERSISTED');
-                  })
-                  .catch((err) => {
-                    console.error('OptoPupil DB: Failed to persist measurement record:', err);
-                    setPersistenceError(err?.message || 'Failed to save measurement');
-                    setWorkflowState('PERSISTED');
-                  })
-                  .finally(() => {
-                    isWritingRef.current = false;
-                    setIsSaving(false);
-                  });
-              } else {
-                setWorkflowState('PERSISTED');
-              }
-            });
-          }
-        }, STABLE_DETECTION_MS);
-      } else if (stateRef.current === 'DETECTING' && detectionStartTimeRef.current !== null) {
-        // Update stability progress percentage
-        const elapsed = performance.now() - detectionStartTimeRef.current;
-        const progress = Math.min(100, Math.round((elapsed / STABLE_DETECTION_MS) * 100));
-        setStabilityProgress(progress);
+      // If a stimulus has already been triggered for this continuous session, do not re-trigger
+      if (hasTriggeredForSessionRef.current) {
+        setScreeningState('PERSISTED');
+        return;
       }
-      // If stateRef.current is 'PERSISTED' or 'STIMULUS_ACTIVE': do not re-trigger!
-    } else {
-      // Detection is lost or invalid
-      if (stateRef.current === 'DETECTING') {
-        // Lost detection before 1.0s stability completed -> cancel pending stimulus & reset
-        if (stabilityTimerRef.current !== null) {
-          window.clearTimeout(stabilityTimerRef.current);
-          stabilityTimerRef.current = null;
+
+      // Add valid bilateral measurement to rolling window
+      const window = rollingWindowRef.current;
+      window.push({ left: currentLeftPx, right: currentRightPx });
+      if (window.length > STABILITY_WINDOW_SIZE) {
+        window.shift();
+      }
+
+      setWindowSamplesCount(window.length);
+
+      // Check stability if rolling window has enough samples
+      if (window.length >= STABILITY_WINDOW_SIZE) {
+        const leftVals = window.map((s) => s.left);
+        const rightVals = window.map((s) => s.right);
+
+        const leftRange = Math.max(...leftVals) - Math.min(...leftVals);
+        const rightRange = Math.max(...rightVals) - Math.min(...rightVals);
+
+        setLeftDeltaPx(Number(leftRange.toFixed(2)));
+        setRightDeltaPx(Number(rightRange.toFixed(2)));
+
+        const isLeftStable = leftRange <= STABILITY_TOLERANCE_PX;
+        const isRightStable = rightRange <= STABILITY_TOLERANCE_PX;
+        const stable = isLeftStable && isRightStable;
+
+        setIsBaselineStable(stable);
+
+        if (stable && !isWritingRef.current) {
+          // --- STABLE BASELINE REACHED: TRIGGER STIMULUS & CAPTURE AT ONSET ---
+          hasTriggeredForSessionRef.current = true;
+          setScreeningState('STIMULUS_ACTIVE');
+
+          const onsetTime = performance.now();
+          const captureTimestamp = new Date().toISOString();
+          const captureLeftPx = Number(currentLeftPx.toFixed(2));
+          const captureRightPx = Number(currentRightPx.toFixed(2));
+
+          // 1. Immediately trigger the existing display light stimulus
+          startStimulus(STIMULUS_DURATION_MS, () => {
+            setScreeningState('PERSISTED');
+          });
+
+          // 2. Immediately capture the current bilateral measurement at stimulus onset and persist
+          isWritingRef.current = true;
+          setIsSaving(true);
+
+          const record: Omit<PupilMeasurementRecord, 'id'> = {
+            timestamp: captureTimestamp,
+            left_pupil_px: captureLeftPx,
+            right_pupil_px: captureRightPx,
+            status: 'DETECTED',
+            stimulus_onset: true,
+            stimulus_onset_ms: onsetTime,
+            perf_timestamp_ms: onsetTime,
+          };
+
+          pupilDatabase
+            .savePupilMeasurement(record)
+            .then(() => {
+              setPersistenceError(null);
+            })
+            .catch((err) => {
+              console.error('OptoPupil DB: Failed to persist stimulus measurement record:', err);
+              setPersistenceError(err?.message || 'Failed to save measurement');
+            })
+            .finally(() => {
+              isWritingRef.current = false;
+              setIsSaving(false);
+            });
+        } else {
+          setScreeningState('COLLECTING_BASELINE');
         }
-        detectionStartTimeRef.current = null;
-        setWorkflowState('IDLE');
-        setStabilityProgress(0);
-      } else if (stateRef.current === 'PERSISTED') {
-        // In completed screening state: debounce lost frames before resetting to IDLE for next screening
+      } else {
+        setScreeningState('COLLECTING_BASELINE');
+        setIsBaselineStable(false);
+      }
+    } else {
+      // Detection is lost or degraded
+      // Reset rolling window immediately on lost/invalid frame so bad frames do not pollute stability
+      if (!hasTriggeredForSessionRef.current) {
+        rollingWindowRef.current = [];
+        setWindowSamplesCount(0);
+        setLeftDeltaPx(0);
+        setRightDeltaPx(0);
+        setIsBaselineStable(false);
+        setScreeningState('IDLE');
+      } else {
+        // Session was completed: debounce lost frames before resetting to IDLE for next screening
         lostFramesCountRef.current += 1;
         if (lostFramesCountRef.current >= LOST_FRAMES_COOLDOWN) {
-          setWorkflowState('IDLE');
-          setStabilityProgress(0);
-          detectionStartTimeRef.current = null;
+          hasTriggeredForSessionRef.current = false;
+          rollingWindowRef.current = [];
           lostFramesCountRef.current = 0;
+          setScreeningState('IDLE');
+          setWindowSamplesCount(0);
+          setLeftDeltaPx(0);
+          setRightDeltaPx(0);
+          setIsBaselineStable(false);
         }
       }
     }
-  }, [pupilData, isActive, startStimulus, setWorkflowState]);
-
-  // Clean up timers on unmount
-  useEffect(() => {
-    return () => {
-      if (stabilityTimerRef.current !== null) {
-        window.clearTimeout(stabilityTimerRef.current);
-        stabilityTimerRef.current = null;
-      }
-    };
-  }, []);
+  }, [pupilData, isActive, startStimulus]);
 
   return {
     latestMeasurement,
@@ -281,7 +291,10 @@ export function useMeasurementPersistence({
     isSaving,
     persistenceError,
     screeningState,
-    stabilityProgress,
+    windowSamplesCount,
+    leftDeltaPx,
+    rightDeltaPx,
+    isBaselineStable,
     refresh,
     clearHistory,
   };

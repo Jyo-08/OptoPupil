@@ -14,6 +14,8 @@ export interface PupilMeasurementRecord {
   right_pupil_px: number;
   /** Valid bilateral detection status */
   status: 'DETECTED';
+  /** Flag indicating measurement was captured at stimulus onset */
+  stimulus_onset?: boolean;
   /** Optional high-resolution performance timestamp in milliseconds */
   perf_timestamp_ms?: number;
   /** Optional stimulus onset timestamp from performance.now() */

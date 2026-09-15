@@ -53,7 +53,7 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
     defaultDurationMs,
   } = useDisplayStimulus();
 
-  // Automated stable detection screening workflow & measurement persistence to IndexedDB
+  // Automated stable baseline screening workflow & measurement persistence to IndexedDB
   const {
     latestMeasurement,
     recentRecords,
@@ -61,7 +61,10 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
     isSaving,
     persistenceError,
     screeningState,
-    stabilityProgress,
+    windowSamplesCount,
+    leftDeltaPx,
+    rightDeltaPx,
+    isBaselineStable,
     refresh,
     clearHistory,
   } = useMeasurementPersistence({
@@ -172,7 +175,10 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
             isSaving={isSaving}
             persistenceError={persistenceError}
             screeningState={screeningState}
-            stabilityProgress={stabilityProgress}
+            windowSamplesCount={windowSamplesCount}
+            leftDeltaPx={leftDeltaPx}
+            rightDeltaPx={rightDeltaPx}
+            isBaselineStable={isBaselineStable}
             onRefresh={refresh}
             onClear={clearHistory}
           />
