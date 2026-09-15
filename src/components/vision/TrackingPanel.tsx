@@ -3,7 +3,7 @@ import type { TrackingQuality, BilateralPupilData } from '../../types/vision';
 import type { CameraState } from '../../camera/types';
 import type { FaceLandmarkerStatus } from '../../vision/face/types';
 import { StatusBadge } from '../common/StatusBadge';
-import { CheckCircle2, AlertTriangle, XCircle, RefreshCw, Cpu, Compass, CircleDot } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, XCircle, RefreshCw, Cpu, Compass, CircleDot, Activity } from 'lucide-react';
 
 interface TrackingPanelProps {
   tracking: TrackingQuality;
@@ -63,6 +63,12 @@ export const TrackingPanel: React.FC<TrackingPanelProps> = ({
                 <span>{leftPupil.majorAxisPx.toFixed(1)} × {leftPupil.minorAxisPx.toFixed(1)} px</span>
               </div>
             )}
+            {leftPupil.stability && (
+              <div className="mt-2 border-t border-slate-800/80 pt-1.5 flex items-center justify-between text-[10px] font-mono text-slate-400">
+                <span>CV: {leftPupil.stability.cvPercent.toFixed(1)}%</span>
+                <span>&plusmn;{leftPupil.stability.stdDevPx.toFixed(2)} px</span>
+              </div>
+            )}
           </div>
 
           {/* Right Pupil */}
@@ -81,6 +87,12 @@ export const TrackingPanel: React.FC<TrackingPanelProps> = ({
               <div className="mt-1 flex items-center justify-between text-[10px] font-mono text-slate-400">
                 <span>AXES:</span>
                 <span>{rightPupil.majorAxisPx.toFixed(1)} × {rightPupil.minorAxisPx.toFixed(1)} px</span>
+              </div>
+            )}
+            {rightPupil.stability && (
+              <div className="mt-2 border-t border-slate-800/80 pt-1.5 flex items-center justify-between text-[10px] font-mono text-slate-400">
+                <span>CV: {rightPupil.stability.cvPercent.toFixed(1)}%</span>
+                <span>&plusmn;{rightPupil.stability.stdDevPx.toFixed(2)} px</span>
               </div>
             )}
           </div>
@@ -165,11 +177,17 @@ export const TrackingPanel: React.FC<TrackingPanelProps> = ({
 
       {/* Hardware & Pipeline Diagnostics Card */}
       <div className="rounded-xl border border-slate-800 bg-[#0d1322] p-4 shadow-lg text-xs">
-        <div className="flex items-center gap-2 border-b border-slate-800/80 pb-3">
-          <Cpu className="h-4 w-4 text-cyan-400" />
-          <span className="font-mono text-xs font-semibold tracking-wider text-slate-200 uppercase">
-            System Diagnostics
-          </span>
+        <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+          <div className="flex items-center gap-2">
+            <Cpu className="h-4 w-4 text-cyan-400" />
+            <span className="font-mono text-xs font-semibold tracking-wider text-slate-200 uppercase">
+              System Diagnostics
+            </span>
+          </div>
+          <div className="flex items-center gap-1 text-[10px] font-mono text-emerald-400">
+            <Activity className="h-3 w-3" />
+            <span>GPU PIPELINE</span>
+          </div>
         </div>
 
         <div className="mt-3 space-y-2 font-mono">

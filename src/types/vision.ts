@@ -50,6 +50,17 @@ export type TrackingStatus = 'GOOD' | 'DEGRADED' | 'LOST';
 
 export type PupilDetectionStatus = 'DETECTED' | 'UNCERTAIN' | 'LOST';
 
+export interface StabilityStats {
+  sampleCount: number;
+  minDiameterPx: number;
+  maxDiameterPx: number;
+  meanDiameterPx: number;
+  medianDiameterPx: number;
+  rangePx: number;
+  stdDevPx: number;
+  cvPercent: number; // Coefficient of variation: (stdDev / mean) * 100%
+}
+
 export interface PupilGeometry {
   detected: boolean;
   status: PupilDetectionStatus;
@@ -66,6 +77,8 @@ export interface PupilGeometry {
   // Measured quality heuristics (darkness contrast & circularity score)
   contrastScore?: number;
   circularityScore?: number;
+  // Rolling quantitative stability statistics
+  stability?: StabilityStats;
 }
 
 export interface BilateralPupilData {

@@ -1,4 +1,4 @@
-import type { PupilGeometry, BilateralPupilData } from '../../types/vision';
+import type { PupilGeometry, BilateralPupilData, StabilityStats } from '../../types/vision';
 
 export interface StabilizerConfig {
   /**
@@ -15,12 +15,22 @@ export interface StabilizerConfig {
    * Maximum allowed frame-to-frame position jump in normalized space before flagging as jump artifact.
    */
   maxNormalizedJump: number;
+  /**
+   * Maximum single-frame diameter ratio change allowed before flagging as an outlier.
+   */
+  maxDiameterRatioJump: number;
+  /**
+   * Rolling window size for quantitative stability statistics.
+   */
+  statsWindowSize: number;
 }
 
 const DEFAULT_CONFIG: StabilizerConfig = {
   alpha: 0.65,
   lossFrameThreshold: 3,
   maxNormalizedJump: 0.08,
+  maxDiameterRatioJump: 0.22,
+  statsWindowSize: 60,
 };
 
 export class SinglePupilStabilizer {
@@ -28,6 +38,7 @@ export class SinglePupilStabilizer {
   private prevStabilized: PupilGeometry | null = null;
   private consecutiveLostFrames = 0;
   private consecutiveValidFrames = 0;
+  private recentDiameters: number[] = [];
 
   constructor(config: Partial<StabilizerConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -35,34 +46,49 @@ export class SinglePupilStabilizer {
 
   public process(raw: PupilGeometry): PupilGeometry {
     // Case 1: Raw pupil is validly DETECTED
-    if (raw.detected && raw.centerPx && raw.radiusPx && raw.centerNorm) {
+    if (raw.detected && raw.centerPx && raw.radiusPx && raw.centerNorm && raw.diameterPx) {
       this.consecutiveLostFrames = 0;
       this.consecutiveValidFrames++;
 
       // If we just recovered from loss or this is the first frame, reset to raw directly
       if (!this.prevStabilized || !this.prevStabilized.detected || this.consecutiveValidFrames === 1) {
+        this.addStatSample(raw.diameterPx);
         const initialStabilized: PupilGeometry = {
           ...raw,
           status: 'DETECTED',
+          stability: this.calculateStats(),
         };
         this.prevStabilized = initialStabilized;
         return initialStabilized;
       }
 
-      // Check for sudden spatial jumps
+      // Check for sudden spatial and diameter outlier jumps
       const prevNorm = this.prevStabilized.centerNorm;
-      let isJump = false;
-      if (prevNorm) {
+      const prevDiameter = this.prevStabilized.diameterPx;
+      let isOutlier = false;
+
+      if (prevNorm && prevDiameter) {
         const dx = raw.centerNorm.x - prevNorm.x;
         const dy = raw.centerNorm.y - prevNorm.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > this.config.maxNormalizedJump) {
-          isJump = true;
+        const diameterRatio = Math.abs(raw.diameterPx - prevDiameter) / prevDiameter;
+
+        if (dist > this.config.maxNormalizedJump || diameterRatio > this.config.maxDiameterRatioJump) {
+          isOutlier = true;
         }
       }
 
+      // If outlier on single frame, treat as UNCERTAIN without corrupting baseline
+      if (isOutlier && this.consecutiveValidFrames < 3) {
+        return {
+          ...raw,
+          status: 'UNCERTAIN',
+          stability: this.calculateStats(),
+        };
+      }
+
       // Apply Exponential Moving Average (EMA) smoothing
-      const a = isJump ? 0.9 : this.config.alpha;
+      const a = isOutlier ? 0.85 : this.config.alpha;
       const smoothedRadiusPx =
         this.prevStabilized.radiusPx !== null
           ? a * raw.radiusPx + (1 - a) * this.prevStabilized.radiusPx
@@ -90,6 +116,8 @@ export class SinglePupilStabilizer {
           ? a * raw.centerNorm.y + (1 - a) * this.prevStabilized.centerNorm.y
           : raw.centerNorm.y;
 
+      this.addStatSample(smoothedDiameterPx);
+
       const stabilized: PupilGeometry = {
         detected: true,
         status: 'DETECTED',
@@ -102,6 +130,7 @@ export class SinglePupilStabilizer {
         angleRad: raw.angleRad,
         contrastScore: raw.contrastScore,
         circularityScore: raw.circularityScore,
+        stability: this.calculateStats(),
       };
 
       this.prevStabilized = stabilized;
@@ -123,16 +152,69 @@ export class SinglePupilStabilizer {
       centerPx: null,
       radiusPx: null,
       diameterPx: null,
+      stability: this.calculateStats(),
     };
 
     this.prevStabilized = lostStabilized;
     return lostStabilized;
   }
 
+  private addStatSample(diameter: number): void {
+    this.recentDiameters.push(diameter);
+    if (this.recentDiameters.length > this.config.statsWindowSize) {
+      this.recentDiameters.shift();
+    }
+  }
+
+  public calculateStats(): StabilityStats | undefined {
+    if (this.recentDiameters.length < 5) {
+      return undefined;
+    }
+
+    const n = this.recentDiameters.length;
+    let min = Infinity;
+    let max = -Infinity;
+    let sum = 0;
+
+    for (let i = 0; i < n; i++) {
+      const v = this.recentDiameters[i];
+      if (v < min) min = v;
+      if (v > max) max = v;
+      sum += v;
+    }
+
+    const mean = sum / n;
+    let sumSqDiff = 0;
+
+    for (let i = 0; i < n; i++) {
+      const diff = this.recentDiameters[i] - mean;
+      sumSqDiff += diff * diff;
+    }
+
+    const stdDev = Math.sqrt(sumSqDiff / n);
+    const cvPercent = mean > 0 ? (stdDev / mean) * 100 : 0;
+
+    // Calculate median
+    const sorted = [...this.recentDiameters].sort((a, b) => a - b);
+    const median = n % 2 === 0 ? (sorted[n / 2 - 1] + sorted[n / 2]) / 2 : sorted[Math.floor(n / 2)];
+
+    return {
+      sampleCount: n,
+      minDiameterPx: min,
+      maxDiameterPx: max,
+      meanDiameterPx: mean,
+      medianDiameterPx: median,
+      rangePx: max - min,
+      stdDevPx: stdDev,
+      cvPercent,
+    };
+  }
+
   public reset(): void {
     this.prevStabilized = null;
     this.consecutiveLostFrames = 0;
     this.consecutiveValidFrames = 0;
+    this.recentDiameters = [];
   }
 }
 
