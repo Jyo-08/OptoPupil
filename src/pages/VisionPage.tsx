@@ -60,19 +60,7 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
     onFrame: recordingState.handleFrame,
   });
 
-<<<<<<< HEAD
-  // Initialize Controlled Display Light Stimulus Controller
-  const {
-    isStimulusActive,
-    startStimulus,
-    lastTiming,
-    defaultDurationMs,
-  } = useDisplayStimulus();
-
   // Automated stable baseline screening workflow & two-database persistence
-=======
-  // Automated stable detection screening workflow & measurement persistence to IndexedDB
->>>>>>> 5d19b52 (feat(plr): implement time-series recording, signal processing, and quantitative kinetics engine)
   const {
     currentSessionId,
     latestFinalRecord,
@@ -217,37 +205,12 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
           />
         </div>
 
-<<<<<<< HEAD
-        {/* Right / Bottom: Reordered Sidebar (4 cols) */}
-        <div className="lg:col-span-4 flex flex-col gap-4">
-          {/* 1. [ BASELINE PERSISTED DB ] (Swapped to top position) */}
-=======
         {/* Right Column: Quantitative Kinetics, Bilateral Asymmetry, Tracking Telemetry (5 cols) */}
         <div className="lg:col-span-5 flex flex-col gap-4">
           {/* Quantitative PLR Kinetics & Asymmetry Report Card */}
           <PLRMetricsCard report={recordingState.report} />
 
-          {/* Real-time Tracking & Pupil Geometry Panel */}
-          <TrackingPanel
-            tracking={tracking}
-            pupilData={pupilData}
-            cameraState={cameraState}
-            modelStatus={modelStatus}
-            modelError={modelError}
-            onRetryCamera={() => startCamera(cameraState.deviceId || undefined)}
-            onSwitchCamera={(deviceId) => startCamera(deviceId)}
-          />
-
-          {/* Stimulus Test Card */}
-          <StimulusControlCard
-            isStimulusActive={isStimulusActive}
-            onStartStimulus={() => startStimulus()}
-            lastTiming={lastTiming}
-            defaultDurationMs={defaultDurationMs}
-          />
-
-          {/* Persisted Measurement History */}
->>>>>>> 5d19b52 (feat(plr): implement time-series recording, signal processing, and quantitative kinetics engine)
+          {/* 1. [ BASELINE PERSISTED DB ] */}
           <LatestMeasurementCard
             currentSessionId={currentSessionId}
             latestFinalRecord={latestFinalRecord}
@@ -267,9 +230,8 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
             onDeleteFinalRecord={deleteFinalRecord}
             onStartNewSession={startNewSession}
           />
-<<<<<<< HEAD
 
-          {/* 2. [ BILATERAL PUPIL METRICS ] (Swapped to position below BASELINE PERSISTED DB) */}
+          {/* 2. [ BILATERAL PUPIL METRICS ] */}
           <BilateralPupilMetricsCard pupilData={pupilData} />
 
           {/* 3. [ LIGHT STIMULUS CONTROLLER ] */}
@@ -290,8 +252,6 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
             onRetryCamera={() => startCamera(cameraState.deviceId || undefined)}
             onSwitchCamera={(deviceId) => startCamera(deviceId)}
           />
-=======
->>>>>>> 5d19b52 (feat(plr): implement time-series recording, signal processing, and quantitative kinetics engine)
         </div>
       </div>
     </div>

@@ -114,20 +114,20 @@ export function usePLRRecording({ stimulus, onFrameCapture }: UsePLRRecordingPro
           baselineRightPxRef.current || undefined
         );
 
-        // 3. Persist to local database (IndexedDB)
+        // 3. Persist to local database (IndexedDB Database 2)
         if (finalReport.isReliable) {
           try {
-            await finalMeasurementRepository.saveFinalMeasurement({
+            await finalMeasurementRepository.createFinalRecord({
               session_id: finalReport.sessionId,
               timestamp: new Date().toISOString(),
-              baseline_left_px: finalReport.leftEye.baselineDiameterPx,
-              baseline_right_px: finalReport.rightEye.baselineDiameterPx,
-              left_min_px: finalReport.leftEye.minDiameterPx,
-              right_min_px: finalReport.rightEye.minDiameterPx,
-              left_delta_px: finalReport.leftEye.constrictionAmplitudeMm * 20,
-              right_delta_px: finalReport.rightEye.constrictionAmplitudeMm * 20,
+              baseline_left_pupil_px: finalReport.leftEye.baselineDiameterPx,
+              baseline_right_pupil_px: finalReport.rightEye.baselineDiameterPx,
+              stimulus_onset_timestamp: new Date(stimulusTiming.stimulusOnsetTime).toISOString(),
+              stimulus_onset_ms: stimulusTiming.stimulusOnsetTime,
+              stimulus_left_pupil_px: finalReport.leftEye.baselineDiameterPx,
+              stimulus_right_pupil_px: finalReport.rightEye.baselineDiameterPx,
               stimulus_duration_ms: stimulusTiming.actualDurationMs,
-              status: 'COMPLETED',
+              status: 'FINALIZED',
             });
           } catch {
             // DB persistence is auxiliary
