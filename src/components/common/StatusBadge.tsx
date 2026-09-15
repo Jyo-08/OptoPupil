@@ -1,8 +1,8 @@
 import React from 'react';
-import type { TrackingStatus } from '../../types/vision';
+import type { TrackingStatus, PupilDetectionStatus } from '../../types/vision';
 
 interface StatusBadgeProps {
-  status: TrackingStatus | 'ACTIVE' | 'CONNECTING' | 'READY';
+  status: TrackingStatus | PupilDetectionStatus | 'ACTIVE' | 'CONNECTING' | 'READY';
   label?: string;
   size?: 'sm' | 'md' | 'lg';
 }
@@ -17,10 +17,10 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
   let bgClass = 'bg-slate-800/80 border-slate-700 text-slate-300';
   let dotClass = 'bg-slate-400';
 
-  if (status === 'GOOD' || status === 'ACTIVE' || status === 'READY') {
+  if (status === 'GOOD' || status === 'DETECTED' || status === 'ACTIVE' || status === 'READY') {
     bgClass = 'bg-emerald-950/60 border-emerald-600/40 text-emerald-300';
     dotClass = 'bg-emerald-400 animate-pulse';
-  } else if (status === 'DEGRADED' || status === 'CONNECTING') {
+  } else if (status === 'DEGRADED' || status === 'UNCERTAIN' || status === 'CONNECTING') {
     bgClass = 'bg-amber-950/60 border-amber-600/40 text-amber-300';
     dotClass = 'bg-amber-400 animate-ping';
   } else if (status === 'LOST') {

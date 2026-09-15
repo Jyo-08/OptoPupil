@@ -26,11 +26,12 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
     idealHeight: 720,
   });
 
-  // Initialize Vision Pipeline (rAF loop with MediaPipe Face Landmarker & Eye Extractor)
+  // Initialize Vision Pipeline (rAF loop with Face Landmarker, Eye Extractor, Pupil Detector & Stabilizer)
   const {
     modelStatus,
     modelError,
     tracking,
+    pupilData,
   } = useVisionPipeline({
     videoRef,
     canvasRef,
@@ -59,10 +60,10 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
           <div>
             <h2 className="font-mono text-lg font-bold tracking-tight text-slate-100 flex items-center gap-2">
               <Eye className="h-5 w-5 text-cyan-400" />
-              <span>LIVE CV VISUALIZATION</span>
+              <span>LIVE OCULAR &amp; PUPIL TRACKING</span>
             </h2>
             <p className="text-xs text-slate-400">
-              MediaPipe Face Landmarker &bull; Real-time Bilateral Iris Extraction
+              Real-time Bilateral Iris &amp; Sub-pixel Pupil Segmentation
             </p>
           </div>
         </div>
@@ -113,23 +114,25 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
           {/* Viewport Sub-bar */}
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800/80 bg-[#0d1322] px-3.5 py-2 text-[11px] font-mono text-slate-400">
             <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-purple-400"></span>
+              <span className="text-purple-300">PURPLE: PUPIL BOUNDARY &amp; CENTER</span>
+            </div>
+            <div className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-cyan-400"></span>
-              <span>CYAN: IRIS CENTER &amp; BOUNDARY</span>
+              <span>CYAN: IRIS BOUNDARY</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-sky-400"></span>
               <span>BLUE: OCULAR CONTOUR</span>
             </div>
-            <div className="flex items-center gap-2 text-slate-400">
-              <span>LATENCY: ZERO-SERVER LOCAL</span>
-            </div>
           </div>
         </div>
 
-        {/* Right / Bottom: Tracking Quality & CV Diagnostics Panel (4 cols) */}
+        {/* Right / Bottom: Pupil Metrics & Diagnostics Panel (4 cols) */}
         <div className="lg:col-span-4">
           <TrackingPanel
             tracking={tracking}
+            pupilData={pupilData}
             cameraState={cameraState}
             modelStatus={modelStatus}
             modelError={modelError}

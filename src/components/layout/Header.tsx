@@ -32,12 +32,12 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="font-mono text-base font-bold tracking-wider text-slate-100 uppercase">
                 OptoPupil
               </span>
-              <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-cyan-400">
-                CV-V1
+              <span className="rounded bg-cyan-950/60 border border-cyan-800/40 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-cyan-300">
+                SCREENING
               </span>
             </div>
             <p className="text-[11px] text-slate-400 hidden sm:block">
-              Zero-Hardware Quantitative PLR Screening
+              Zero-Hardware Quantitative Pupillary Light Reflex Screening
             </p>
           </div>
         </button>
@@ -48,8 +48,8 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1.5 rounded-md border border-slate-800 bg-slate-900/60 px-2.5 py-1 text-xs text-slate-300">
                 <Activity className="h-3.5 w-3.5 text-cyan-400" />
-                <span className="font-mono text-[11px] text-slate-400 hidden xs:inline">PIPELINE:</span>
-                <span className="font-mono text-[11px] text-cyan-300 font-medium">MEDIAPIPE CV</span>
+                <span className="font-mono text-[11px] text-slate-400 hidden xs:inline">SYSTEM:</span>
+                <span className="font-mono text-[11px] text-cyan-300 font-medium">ACTIVE CV</span>
               </div>
               <button
                 onClick={onNavigateLanding}
@@ -64,7 +64,7 @@ export const Header: React.FC<HeaderProps> = ({
               className="flex items-center gap-2 rounded-md border border-cyan-500/40 bg-cyan-500/10 px-3.5 py-1.5 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/20 hover:border-cyan-400 transition"
             >
               <Eye className="h-3.5 w-3.5" />
-              <span>Launch CV Feed</span>
+              <span>Launch Screening</span>
             </button>
           )}
         </div>

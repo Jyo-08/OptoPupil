@@ -13,10 +13,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStart }) => {
       <div className="pointer-events-none absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 h-96 w-96 rounded-full bg-cyan-500/10 blur-3xl" />
 
       <div className="relative z-10 mx-auto max-w-4xl text-center">
-        {/* Hackathon Project Tag */}
+        {/* Project Tag */}
         <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-950/40 px-3.5 py-1 text-xs font-mono font-medium text-cyan-300 backdrop-blur-md mb-6 shadow-[0_0_15px_rgba(6,182,212,0.15)]">
           <Sparkles className="h-3.5 w-3.5" />
-          <span>VMEDITHON 3.0 &bull; Computer Vision Milestone 1</span>
+          <span>Zero-Hardware Pupillometry Platform</span>
         </div>
 
         {/* Title & Tagline */}

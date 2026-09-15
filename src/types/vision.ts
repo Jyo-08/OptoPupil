@@ -1,6 +1,7 @@
 /**
- * Core type definitions for OptoPupil Computer Vision Milestone 1.
- * Provides strict contracts for landmark coordinates, ocular extraction, and tracking state.
+ * Core type definitions for OptoPupil Computer Vision & Pupil Detection Engine.
+ * Provides strict contracts for landmark coordinates, ocular extraction,
+ * pupil geometry, temporal stabilization, and tracking states.
  */
 
 export interface NormalizedLandmark {
@@ -47,6 +48,33 @@ export interface ExtractedOcularData {
 
 export type TrackingStatus = 'GOOD' | 'DEGRADED' | 'LOST';
 
+export type PupilDetectionStatus = 'DETECTED' | 'UNCERTAIN' | 'LOST';
+
+export interface PupilGeometry {
+  detected: boolean;
+  status: PupilDetectionStatus;
+  // Normalized coordinates (0 to 1) for canvas rendering and responsive alignment
+  centerNorm: NormalizedLandmark | null;
+  // Pixel coordinates in native video frame space
+  centerPx: PixelPoint | null;
+  radiusPx: number | null;
+  diameterPx: number | null;
+  // Ellipse fitting properties (major/minor axis & orientation angle)
+  majorAxisPx?: number;
+  minorAxisPx?: number;
+  angleRad?: number;
+  // Measured quality heuristics (darkness contrast & circularity score)
+  contrastScore?: number;
+  circularityScore?: number;
+}
+
+export interface BilateralPupilData {
+  leftPupil: PupilGeometry;
+  rightPupil: PupilGeometry;
+  rawLeftPupil: PupilGeometry;
+  rawRightPupil: PupilGeometry;
+}
+
 export interface TrackingQuality {
   status: TrackingStatus;
   faceDetected: boolean;
@@ -68,5 +96,6 @@ export interface VisionFrameOutput {
   timestamp: number;
   allLandmarks: NormalizedLandmark[] | null;
   ocularData: ExtractedOcularData;
+  pupilData: BilateralPupilData;
   tracking: TrackingQuality;
 }
