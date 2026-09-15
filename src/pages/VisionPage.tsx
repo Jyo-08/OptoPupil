@@ -3,6 +3,7 @@ import { useCamera } from '../camera/useCamera';
 import { useVisionPipeline } from '../hooks/useVisionPipeline';
 import { useMeasurementPersistence } from '../hooks/useMeasurementPersistence';
 import { CameraView } from '../components/vision/CameraView';
+import { BilateralPupilMetricsCard } from '../components/vision/BilateralPupilMetricsCard';
 import { TrackingPanel } from '../components/vision/TrackingPanel';
 import { LatestMeasurementCard } from '../components/dashboard/LatestMeasurementCard';
 import {
@@ -53,11 +54,13 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
     defaultDurationMs,
   } = useDisplayStimulus();
 
-  // Automated stable baseline screening workflow & measurement persistence to IndexedDB
+  // Automated stable baseline screening workflow & two-database persistence
   const {
-    latestMeasurement,
-    recentRecords,
-    totalCount,
+    currentSessionId,
+    latestFinalRecord,
+    allFinalRecords,
+    finalCount,
+    rawCount,
     isSaving,
     persistenceError,
     screeningState,
@@ -65,8 +68,11 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
     leftDeltaPx,
     rightDeltaPx,
     isBaselineStable,
+    deleteFinalRecord,
+    clearRawDb,
+    clearFinalDb,
+    startNewSession,
     refresh,
-    clearHistory,
   } = useMeasurementPersistence({
     pupilData,
     isActive: cameraState.status === 'active',
@@ -82,7 +88,7 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
 
   return (
     <div className="relative mx-auto max-w-7xl px-4 py-6 sm:px-6">
-      {/* Full-Screen Pure White Controlled Light Stimulus Overlay */}
+      {/* Full-Screen Pure White Controlled Light Stimulus Overlay (rendered via document.body Portal) */}
       <DisplayStimulusOverlay isActive={isStimulusActive} />
 
       {/* Top Header / Stage Breadcrumb */}
@@ -166,12 +172,15 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
           </div>
         </div>
 
-        {/* Right / Bottom: Light Stimulus, Persisted Measurement & Pupil Metrics (4 cols) */}
+        {/* Right / Bottom: Reordered Sidebar (4 cols) */}
         <div className="lg:col-span-4 flex flex-col gap-4">
+          {/* 1. [ BASELINE PERSISTED DB ] (Swapped to top position) */}
           <LatestMeasurementCard
-            latestMeasurement={latestMeasurement}
-            recentRecords={recentRecords}
-            totalCount={totalCount}
+            currentSessionId={currentSessionId}
+            latestFinalRecord={latestFinalRecord}
+            allFinalRecords={allFinalRecords}
+            finalCount={finalCount}
+            rawCount={rawCount}
             isSaving={isSaving}
             persistenceError={persistenceError}
             screeningState={screeningState}
@@ -180,9 +189,16 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
             rightDeltaPx={rightDeltaPx}
             isBaselineStable={isBaselineStable}
             onRefresh={refresh}
-            onClear={clearHistory}
+            onClearRawDb={clearRawDb}
+            onClearFinalDb={clearFinalDb}
+            onDeleteFinalRecord={deleteFinalRecord}
+            onStartNewSession={startNewSession}
           />
 
+          {/* 2. [ BILATERAL PUPIL METRICS ] (Swapped to position below BASELINE PERSISTED DB) */}
+          <BilateralPupilMetricsCard pupilData={pupilData} />
+
+          {/* 3. [ LIGHT STIMULUS CONTROLLER ] */}
           <StimulusControlCard
             isStimulusActive={isStimulusActive}
             onStartStimulus={() => startStimulus()}
@@ -190,6 +206,7 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
             defaultDurationMs={defaultDurationMs}
           />
 
+          {/* 4. [ TRACKING STATE & SYSTEM DIAGNOSTICS ] */}
           <TrackingPanel
             tracking={tracking}
             pupilData={pupilData}

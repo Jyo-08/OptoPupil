@@ -2,7 +2,7 @@ import React from 'react';
 import type { TrackingStatus, PupilDetectionStatus } from '../../types/vision';
 
 interface StatusBadgeProps {
-  status: TrackingStatus | PupilDetectionStatus | 'ACTIVE' | 'CONNECTING' | 'READY';
+  status: TrackingStatus | PupilDetectionStatus | 'ACTIVE' | 'CONNECTING' | 'READY' | 'FINALIZED';
   label?: string;
   size?: 'sm' | 'md' | 'lg';
 }
@@ -17,7 +17,13 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
   let bgClass = 'bg-slate-800/80 border-slate-700 text-slate-300';
   let dotClass = 'bg-slate-400';
 
-  if (status === 'GOOD' || status === 'DETECTED' || status === 'ACTIVE' || status === 'READY') {
+  if (
+    status === 'GOOD' ||
+    status === 'DETECTED' ||
+    status === 'ACTIVE' ||
+    status === 'READY' ||
+    status === 'FINALIZED'
+  ) {
     bgClass = 'bg-emerald-950/60 border-emerald-600/40 text-emerald-300';
     dotClass = 'bg-emerald-400 animate-pulse';
   } else if (status === 'DEGRADED' || status === 'UNCERTAIN' || status === 'CONNECTING') {
