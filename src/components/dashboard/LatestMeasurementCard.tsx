@@ -1,10 +1,22 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { PupilMeasurementRecord } from '../../db/types';
 import { StatusBadge } from '../common/StatusBadge';
-import { Database, Clock, HardDrive, CheckCircle2, AlertCircle, Trash2, RefreshCw } from 'lucide-react';
+import {
+  Database,
+  Clock,
+  HardDrive,
+  CheckCircle2,
+  AlertCircle,
+  Trash2,
+  RefreshCw,
+  History,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
 
 interface LatestMeasurementCardProps {
   latestMeasurement: PupilMeasurementRecord | null;
+  recentRecords?: PupilMeasurementRecord[];
   totalCount: number;
   isSaving: boolean;
   persistenceError: string | null;
@@ -14,12 +26,15 @@ interface LatestMeasurementCardProps {
 
 export const LatestMeasurementCard: React.FC<LatestMeasurementCardProps> = ({
   latestMeasurement,
+  recentRecords = [],
   totalCount,
   isSaving,
   persistenceError,
   onRefresh,
   onClear,
 }) => {
+  const [showHistory, setShowHistory] = useState<boolean>(false);
+
   // Format captured timestamp to local time HH:MM:SS
   const formatTime = (isoString?: string) => {
     if (!isoString) return '—';
@@ -50,18 +65,18 @@ export const LatestMeasurementCard: React.FC<LatestMeasurementCardProps> = ({
           {isSaving ? (
             <span className="rounded bg-cyan-950/80 border border-cyan-700/60 px-2 py-0.5 text-cyan-300 animate-pulse flex items-center gap-1">
               <RefreshCw className="h-2.5 w-2.5 animate-spin" />
-              WRITING...
+              RECORDING...
             </span>
           ) : (
             <span className="rounded bg-slate-900 border border-slate-800 px-2 py-0.5 text-slate-400 flex items-center gap-1">
               <HardDrive className="h-2.5 w-2.5 text-cyan-400" />
-              <span>{totalCount} RECORDS</span>
+              <span>{totalCount} {totalCount === 1 ? 'RECORD' : 'RECORDS'}</span>
             </span>
           )}
         </div>
       </div>
 
-      {/* Persistence Error Banner if any */}
+      {/* Persistence Error Banner */}
       {persistenceError && (
         <div className="mt-3 flex items-start gap-2 rounded-lg border border-rose-600/30 bg-rose-950/30 p-2.5 text-rose-300">
           <AlertCircle className="h-4 w-4 flex-shrink-0 text-rose-400 mt-0.5" />
@@ -72,7 +87,7 @@ export const LatestMeasurementCard: React.FC<LatestMeasurementCardProps> = ({
         </div>
       )}
 
-      {/* Main Measurement Content */}
+      {/* Main Latest Measurement Content */}
       {latestMeasurement ? (
         <div className="mt-3 space-y-3 font-mono">
           {/* Bilateral Measurement Metrics */}
@@ -113,14 +128,54 @@ export const LatestMeasurementCard: React.FC<LatestMeasurementCardProps> = ({
 
             {latestMeasurement.id && (
               <div className="flex items-center justify-between text-[10px] text-slate-500 border-t border-slate-800/60 pt-1.5">
-                <span>RECORD ID: #{latestMeasurement.id}</span>
+                <span>LATEST RECORD ID: #{latestMeasurement.id}</span>
                 <span className="flex items-center gap-1 text-emerald-400">
                   <CheckCircle2 className="h-3 w-3" />
-                  SYNCED TO DB
+                  IMMUTABLE
                 </span>
               </div>
             )}
           </div>
+
+          {/* Expandable Historical Log */}
+          {recentRecords.length > 1 && (
+            <div className="border-t border-slate-800/60 pt-2">
+              <button
+                onClick={() => setShowHistory(!showHistory)}
+                className="flex w-full items-center justify-between text-[11px] text-slate-400 hover:text-cyan-300 transition py-1"
+              >
+                <span className="flex items-center gap-1.5 font-semibold">
+                  <History className="h-3.5 w-3.5 text-cyan-400" />
+                  <span>Historical Records ({recentRecords.length})</span>
+                </span>
+                {showHistory ? (
+                  <ChevronUp className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronDown className="h-3.5 w-3.5" />
+                )}
+              </button>
+
+              {showHistory && (
+                <div className="mt-2 max-h-40 overflow-y-auto rounded border border-slate-800 bg-slate-950/60 p-1.5 space-y-1 text-[10px]">
+                  {recentRecords.map((rec) => (
+                    <div
+                      key={rec.id || rec.timestamp}
+                      className={`flex items-center justify-between p-1.5 rounded ${
+                        rec.id === latestMeasurement.id
+                          ? 'bg-cyan-950/40 border border-cyan-800/40 text-cyan-200'
+                          : 'bg-slate-900/50 text-slate-300'
+                      }`}
+                    >
+                      <span className="font-bold text-slate-400">#{rec.id}</span>
+                      <span>L: {rec.left_pupil_px.toFixed(1)}px</span>
+                      <span>R: {rec.right_pupil_px.toFixed(1)}px</span>
+                      <span className="text-slate-400">{formatTime(rec.timestamp)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Database Actions */}
           <div className="flex items-center justify-between pt-1 text-[11px]">
@@ -150,7 +205,7 @@ export const LatestMeasurementCard: React.FC<LatestMeasurementCardProps> = ({
           <Database className="mx-auto h-5 w-5 opacity-40 mb-1.5" />
           <p className="text-[11px]">Awaiting bilateral detection transition...</p>
           <p className="text-[10px] text-slate-600 mt-0.5">
-            Auto-persists to IndexedDB when both pupils are detected
+            Auto-persists a distinct record to IndexedDB when valid bilateral detection begins
           </p>
         </div>
       )}

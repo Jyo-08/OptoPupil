@@ -48,6 +48,7 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
   // Edge-triggered measurement persistence to IndexedDB
   const {
     latestMeasurement,
+    recentRecords,
     totalCount,
     isSaving,
     persistenceError,
@@ -163,6 +164,7 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
         <div className="lg:col-span-4 flex flex-col gap-4">
           <LatestMeasurementCard
             latestMeasurement={latestMeasurement}
+            recentRecords={recentRecords}
             totalCount={totalCount}
             isSaving={isSaving}
             persistenceError={persistenceError}

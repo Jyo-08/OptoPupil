@@ -11,7 +11,9 @@ interface UseMeasurementPersistenceProps {
 export interface UseMeasurementPersistenceReturn {
   /** The most recently persisted measurement in the database */
   latestMeasurement: PupilMeasurementRecord | null;
-  /** Total count of measurement records in the database */
+  /** List of recent distinct historical measurement records (newest first) */
+  recentRecords: PupilMeasurementRecord[];
+  /** Total count of distinct measurement records in the database */
   totalCount: number;
   /** Whether a measurement record is currently being persisted */
   isSaving: boolean;
@@ -23,28 +25,35 @@ export interface UseMeasurementPersistenceReturn {
   clearHistory: () => Promise<void>;
 }
 
+// Minimum consecutive lost frames required to officially close an active measurement session (prevents micro-flicker duplication)
+const LOST_FRAMES_COOLDOWN = 10;
+
 export function useMeasurementPersistence({
   pupilData,
   isActive,
 }: UseMeasurementPersistenceProps): UseMeasurementPersistenceReturn {
   const [latestMeasurement, setLatestMeasurement] = useState<PupilMeasurementRecord | null>(null);
+  const [recentRecords, setRecentRecords] = useState<PupilMeasurementRecord[]>([]);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
 
-  // Tracks the continuous detection state to implement rising-edge capture
-  const wasDetectedRef = useRef<boolean>(false);
-  // Ref to prevent duplicate simultaneous async write tasks
+  // Tracks whether a discrete measurement session/event is currently active
+  const isSessionActiveRef = useRef<boolean>(false);
+  // Tracks consecutive frames without valid bilateral detection before ending session
+  const lostFramesCountRef = useRef<number>(0);
+  // Mutex lock preventing concurrent async writes
   const isWritingRef = useRef<boolean>(false);
 
-  // Fetch initial database records and subscribe to updates
+  // Fetch all historical database records and update state
   const refresh = useCallback(async () => {
     try {
-      const [latest, count] = await Promise.all([
-        pupilDatabase.getLatestPupilMeasurement(),
+      const [allRecords, count] = await Promise.all([
+        pupilDatabase.getAllPupilMeasurements(10),
         pupilDatabase.getMeasurementCount(),
       ]);
-      setLatestMeasurement(latest);
+      setRecentRecords(allRecords);
+      setLatestMeasurement(allRecords.length > 0 ? allRecords[0] : null);
       setTotalCount(count);
       setPersistenceError(null);
     } catch (err: any) {
@@ -57,8 +66,11 @@ export function useMeasurementPersistence({
     try {
       await pupilDatabase.clearPupilMeasurements();
       setLatestMeasurement(null);
+      setRecentRecords([]);
       setTotalCount(0);
       setPersistenceError(null);
+      isSessionActiveRef.current = false;
+      lostFramesCountRef.current = 0;
     } catch (err: any) {
       console.error('OptoPupil DB: Failed to clear measurements:', err);
       setPersistenceError(err?.message || 'Database clear error');
@@ -69,8 +81,12 @@ export function useMeasurementPersistence({
   useEffect(() => {
     refresh();
 
-    const unsubscribe = pupilDatabase.subscribeToMeasurements((record) => {
-      setLatestMeasurement(record);
+    const unsubscribe = pupilDatabase.subscribeToMeasurements((newRecord) => {
+      setLatestMeasurement(newRecord);
+      setRecentRecords((prev) => {
+        const filtered = prev.filter((r) => r.id !== newRecord.id);
+        return [newRecord, ...filtered].slice(0, 10);
+      });
       setTotalCount((prev) => prev + 1);
     });
 
@@ -79,17 +95,19 @@ export function useMeasurementPersistence({
     };
   }, [refresh]);
 
-  // Rising-edge event-based measurement capture loop
+  // Session-based measurement capture loop
   useEffect(() => {
+    // If camera feed is stopped or inactive, end active session immediately
     if (!isActive) {
-      wasDetectedRef.current = false;
+      isSessionActiveRef.current = false;
+      lostFramesCountRef.current = 0;
       return;
     }
 
     const left = pupilData.leftPupil;
     const right = pupilData.rightPupil;
 
-    // Strict validation: both left & right must be in DETECTED state with positive finite numbers
+    // Strict validation: both left & right must be DETECTED with finite positive numbers
     const isLeftValid =
       left.status === 'DETECTED' &&
       typeof left.diameterPx === 'number' &&
@@ -104,10 +122,13 @@ export function useMeasurementPersistence({
 
     const isCurrentlyBilateralDetected = isLeftValid && isRightValid;
 
-    // Edge transition: INVALID -> VALID DETECTED
     if (isCurrentlyBilateralDetected) {
-      if (!wasDetectedRef.current && !isWritingRef.current) {
-        wasDetectedRef.current = true;
+      // Reset lost counter since tracking is active
+      lostFramesCountRef.current = 0;
+
+      // If no session is active, this is the start of a NEW measurement event
+      if (!isSessionActiveRef.current && !isWritingRef.current) {
+        isSessionActiveRef.current = true;
         isWritingRef.current = true;
         setIsSaving(true);
 
@@ -123,7 +144,7 @@ export function useMeasurementPersistence({
           perf_timestamp_ms: performance.now(),
         };
 
-        // Asynchronous non-blocking database insert
+        // Asynchronous non-blocking database insertion
         pupilDatabase
           .savePupilMeasurement(record)
           .then(() => {
@@ -138,14 +159,23 @@ export function useMeasurementPersistence({
             setIsSaving(false);
           });
       }
+      // If isSessionActiveRef.current is ALREADY true: do NOT create/update records on continuous frames!
     } else {
-      // Detection lost or degraded: reset state for subsequent rising edge
-      wasDetectedRef.current = false;
+      // Detection is lost or degraded
+      if (isSessionActiveRef.current) {
+        lostFramesCountRef.current += 1;
+        // Require sustained loss across multiple frames to officially close the session (debounce flicker)
+        if (lostFramesCountRef.current >= LOST_FRAMES_COOLDOWN) {
+          isSessionActiveRef.current = false;
+          lostFramesCountRef.current = 0;
+        }
+      }
     }
   }, [pupilData, isActive]);
 
   return {
     latestMeasurement,
+    recentRecords,
     totalCount,
     isSaving,
     persistenceError,
