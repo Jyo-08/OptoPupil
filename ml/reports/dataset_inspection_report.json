@@ -1,0 +1,138 @@
+{
+  "dataset_root": "/Users/jyotish/Downloads/IRIS + PUPIL + EYE",
+  "train": {
+    "split": "train",
+    "total_images": 1000,
+    "total_masks": 1000,
+    "matched_pairs": 1000,
+    "missing_in_seg": [],
+    "missing_in_img": [],
+    "image_shapes": [
+      [
+        480,
+        640
+      ]
+    ],
+    "mask_shapes": [
+      [
+        480,
+        640
+      ]
+    ],
+    "image_modes": [
+      "L"
+    ],
+    "mask_modes": [
+      "L"
+    ],
+    "unique_mask_values": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "unique_rgb_colors": [],
+    "corrupted_files": [],
+    "pixel_distribution": {
+      "0": {
+        "count": 208793844,
+        "percentage": 67.9667
+      },
+      "1": {
+        "count": 54105374,
+        "percentage": 17.6124
+      },
+      "2": {
+        "count": 14928937,
+        "percentage": 4.8597
+      },
+      "3": {
+        "count": 29371845,
+        "percentage": 9.5611
+      }
+    },
+    "sample_files": [
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/train/image/0213_2_1_2_53_006.png",
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/train/image/0214_1_1_2_20_003.png",
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/train/image/0214_1_1_2_32_001.png",
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/train/image/0214_1_1_2_32_003.png",
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/train/image/0214_1_1_2_34_002.png",
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/train/image/0214_1_1_2_52_003.png",
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/train/image/0214_1_1_2_53_001.png",
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/train/image/0214_2_1_2_20_000.png",
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/train/image/0214_2_1_2_24_002.png",
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/train/image/0214_2_1_2_31_001.png"
+    ]
+  },
+  "val": {
+    "split": "val",
+    "total_images": 275,
+    "total_masks": 275,
+    "matched_pairs": 275,
+    "missing_in_seg": [],
+    "missing_in_img": [],
+    "image_shapes": [
+      [
+        480,
+        640
+      ]
+    ],
+    "mask_shapes": [
+      [
+        480,
+        640
+      ]
+    ],
+    "image_modes": [
+      "L"
+    ],
+    "mask_modes": [
+      "L"
+    ],
+    "unique_mask_values": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "unique_rgb_colors": [],
+    "corrupted_files": [],
+    "pixel_distribution": {
+      "0": {
+        "count": 56326898,
+        "percentage": 66.6748
+      },
+      "1": {
+        "count": 16358384,
+        "percentage": 19.3636
+      },
+      "2": {
+        "count": 4022880,
+        "percentage": 4.7619
+      },
+      "3": {
+        "count": 7771838,
+        "percentage": 9.1996
+      }
+    },
+    "sample_files": [
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/val/image/0193_1_1_2_33_000.png",
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/val/image/0193_1_1_2_51_000.png",
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/val/image/0193_1_1_2_51_006.png",
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/val/image/0193_2_1_2_22_005.png",
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/val/image/0193_2_1_2_24_000.png",
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/val/image/0193_2_1_2_24_005.png",
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/val/image/0193_2_1_2_31_000.png",
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/val/image/0193_2_1_2_31_002.png",
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/val/image/0193_2_1_2_31_004.png",
+      "/Users/jyotish/Downloads/IRIS + PUPIL + EYE/val/image/0193_2_1_2_32_002.png"
+    ]
+  },
+  "summary": {
+    "total_train_pairs": 1000,
+    "total_val_pairs": 275,
+    "total_dataset_pairs": 1275,
+    "consistent_dimensions": true,
+    "corrupted_count": 0
+  }
+}
