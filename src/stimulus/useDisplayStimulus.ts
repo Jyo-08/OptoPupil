@@ -17,6 +17,7 @@ export function useDisplayStimulus(initialDurationMs: number = STIMULUS_DURATION
   const timerRef = useRef<number | null>(null);
   const onsetTimeRef = useRef<number | null>(null);
   const targetDurationRef = useRef<number>(initialDurationMs);
+  const onCompleteCallbackRef = useRef<((timing: StimulusTiming) => void) | null>(null);
 
   // Stop active stimulus and record offset timestamp
   const stopStimulus = useCallback(() => {
@@ -43,16 +44,24 @@ export function useDisplayStimulus(initialDurationMs: number = STIMULUS_DURATION
 
       setLastTiming(timing);
       onsetTimeRef.current = null;
+
+      const callback = onCompleteCallbackRef.current;
+      onCompleteCallbackRef.current = null;
+      if (callback) {
+        callback(timing);
+      }
     }
   }, []);
 
   // Start stimulus for specified or default duration
   const startStimulus = useCallback(
-    (durationMs: number = STIMULUS_DURATION_MS) => {
+    (durationMs: number = STIMULUS_DURATION_MS, onComplete?: (timing: StimulusTiming) => void) => {
       // Guard: prevent multiple simultaneous triggers
       if (isStimulusActiveRef.current) {
         return;
       }
+
+      onCompleteCallbackRef.current = onComplete || null;
 
       // Record high-precision onset timestamp
       const onsetTime = performance.now();
@@ -77,6 +86,7 @@ export function useDisplayStimulus(initialDurationMs: number = STIMULUS_DURATION
         timerRef.current = null;
       }
       isStimulusActiveRef.current = false;
+      onCompleteCallbackRef.current = null;
     };
   }, []);
 

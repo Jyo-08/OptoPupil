@@ -45,20 +45,6 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
     isActive: cameraState.status === 'active',
   });
 
-  // Edge-triggered measurement persistence to IndexedDB
-  const {
-    latestMeasurement,
-    recentRecords,
-    totalCount,
-    isSaving,
-    persistenceError,
-    refresh,
-    clearHistory,
-  } = useMeasurementPersistence({
-    pupilData,
-    isActive: cameraState.status === 'active',
-  });
-
   // Initialize Controlled Display Light Stimulus Controller
   const {
     isStimulusActive,
@@ -66,6 +52,23 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
     lastTiming,
     defaultDurationMs,
   } = useDisplayStimulus();
+
+  // Automated stable detection screening workflow & measurement persistence to IndexedDB
+  const {
+    latestMeasurement,
+    recentRecords,
+    totalCount,
+    isSaving,
+    persistenceError,
+    screeningState,
+    stabilityProgress,
+    refresh,
+    clearHistory,
+  } = useMeasurementPersistence({
+    pupilData,
+    isActive: cameraState.status === 'active',
+    startStimulus,
+  });
 
   // Clean up camera on exit
   useEffect(() => {
@@ -168,6 +171,8 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
             totalCount={totalCount}
             isSaving={isSaving}
             persistenceError={persistenceError}
+            screeningState={screeningState}
+            stabilityProgress={stabilityProgress}
             onRefresh={refresh}
             onClear={clearHistory}
           />

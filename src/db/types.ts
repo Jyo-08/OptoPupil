@@ -16,6 +16,12 @@ export interface PupilMeasurementRecord {
   status: 'DETECTED';
   /** Optional high-resolution performance timestamp in milliseconds */
   perf_timestamp_ms?: number;
+  /** Optional stimulus onset timestamp from performance.now() */
+  stimulus_onset_ms?: number;
+  /** Optional stimulus offset timestamp from performance.now() */
+  stimulus_offset_ms?: number;
+  /** Optional actual measured stimulus duration in milliseconds */
+  stimulus_duration_ms?: number;
 }
 
 export type MeasurementListener = (record: PupilMeasurementRecord) => void;

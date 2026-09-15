@@ -17,8 +17,8 @@ export interface StimulusTiming {
 export interface StimulusController {
   /** Whether the bright display stimulus is currently active */
   isStimulusActive: boolean;
-  /** Starts the light stimulus for the configured or specified duration */
-  startStimulus: (durationMs?: number) => void;
+  /** Starts the light stimulus for the configured or specified duration with optional completion callback */
+  startStimulus: (durationMs?: number, onComplete?: (timing: StimulusTiming) => void) => void;
   /** Immediately stops the active light stimulus */
   stopStimulus: () => void;
   /** Last recorded stimulus timing event */

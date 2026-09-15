@@ -2,10 +2,20 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import type { BilateralPupilData } from '../types/vision';
 import { pupilDatabase } from '../db/pupilDatabase';
 import type { PupilMeasurementRecord } from '../db/types';
+import type { StimulusTiming } from '../stimulus/types';
+import { STABLE_DETECTION_MS, STIMULUS_DURATION_MS } from '../stimulus/config';
+
+export type ScreeningWorkflowState =
+  | 'IDLE'
+  | 'DETECTING'
+  | 'STABLE'
+  | 'STIMULUS_ACTIVE'
+  | 'PERSISTED';
 
 interface UseMeasurementPersistenceProps {
   pupilData: BilateralPupilData;
   isActive: boolean;
+  startStimulus: (durationMs?: number, onComplete?: (timing: StimulusTiming) => void) => void;
 }
 
 export interface UseMeasurementPersistenceReturn {
@@ -19,31 +29,47 @@ export interface UseMeasurementPersistenceReturn {
   isSaving: boolean;
   /** Any error encountered during persistence */
   persistenceError: string | null;
+  /** Current state of the automated screening workflow state machine */
+  screeningState: ScreeningWorkflowState;
+  /** Progress percentage towards stability trigger (0 to 100) */
+  stabilityProgress: number;
   /** Manual refresh trigger for database records */
   refresh: () => Promise<void>;
   /** Clear all persisted records */
   clearHistory: () => Promise<void>;
 }
 
-// Minimum consecutive lost frames required to officially close an active measurement session (prevents micro-flicker duplication)
+// Minimum consecutive lost frames required to officially reset the completed screening session
 const LOST_FRAMES_COOLDOWN = 10;
 
 export function useMeasurementPersistence({
   pupilData,
   isActive,
+  startStimulus,
 }: UseMeasurementPersistenceProps): UseMeasurementPersistenceReturn {
   const [latestMeasurement, setLatestMeasurement] = useState<PupilMeasurementRecord | null>(null);
   const [recentRecords, setRecentRecords] = useState<PupilMeasurementRecord[]>([]);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
+  const [screeningState, setScreeningState] = useState<ScreeningWorkflowState>('IDLE');
+  const [stabilityProgress, setStabilityProgress] = useState<number>(0);
 
-  // Tracks whether a discrete measurement session/event is currently active
-  const isSessionActiveRef = useRef<boolean>(false);
-  // Tracks consecutive frames without valid bilateral detection before ending session
+  // Workflow state refs to avoid closure staleness in rapid animation frames
+  const stateRef = useRef<ScreeningWorkflowState>('IDLE');
+  const detectionStartTimeRef = useRef<number | null>(null);
   const lostFramesCountRef = useRef<number>(0);
-  // Mutex lock preventing concurrent async writes
   const isWritingRef = useRef<boolean>(false);
+  const stabilityTimerRef = useRef<number | null>(null);
+  const pupilDataRef = useRef<BilateralPupilData>(pupilData);
+
+  // Keep latest pupil data reference available for stimulus completion callback
+  pupilDataRef.current = pupilData;
+
+  const setWorkflowState = useCallback((nextState: ScreeningWorkflowState) => {
+    stateRef.current = nextState;
+    setScreeningState(nextState);
+  }, []);
 
   // Fetch all historical database records and update state
   const refresh = useCallback(async () => {
@@ -69,13 +95,15 @@ export function useMeasurementPersistence({
       setRecentRecords([]);
       setTotalCount(0);
       setPersistenceError(null);
-      isSessionActiveRef.current = false;
+      setWorkflowState('IDLE');
+      setStabilityProgress(0);
+      detectionStartTimeRef.current = null;
       lostFramesCountRef.current = 0;
     } catch (err: any) {
       console.error('OptoPupil DB: Failed to clear measurements:', err);
       setPersistenceError(err?.message || 'Database clear error');
     }
-  }, []);
+  }, [setWorkflowState]);
 
   // Subscribe to database change events
   useEffect(() => {
@@ -95,11 +123,17 @@ export function useMeasurementPersistence({
     };
   }, [refresh]);
 
-  // Session-based measurement capture loop
+  // Automated Screening Event Workflow State Machine
   useEffect(() => {
-    // If camera feed is stopped or inactive, end active session immediately
+    // If camera feed is stopped or inactive, reset workflow immediately
     if (!isActive) {
-      isSessionActiveRef.current = false;
+      if (stabilityTimerRef.current !== null) {
+        window.clearTimeout(stabilityTimerRef.current);
+        stabilityTimerRef.current = null;
+      }
+      setWorkflowState('IDLE');
+      setStabilityProgress(0);
+      detectionStartTimeRef.current = null;
       lostFramesCountRef.current = 0;
       return;
     }
@@ -123,55 +157,122 @@ export function useMeasurementPersistence({
     const isCurrentlyBilateralDetected = isLeftValid && isRightValid;
 
     if (isCurrentlyBilateralDetected) {
-      // Reset lost counter since tracking is active
       lostFramesCountRef.current = 0;
 
-      // If no session is active, this is the start of a NEW measurement event
-      if (!isSessionActiveRef.current && !isWritingRef.current) {
-        isSessionActiveRef.current = true;
-        isWritingRef.current = true;
-        setIsSaving(true);
+      // State 1: Transition IDLE -> DETECTING (start stability measurement)
+      if (stateRef.current === 'IDLE') {
+        const now = performance.now();
+        detectionStartTimeRef.current = now;
+        setWorkflowState('DETECTING');
+        setStabilityProgress(0);
 
-        const leftPx = Number(left.diameterPx!.toFixed(2));
-        const rightPx = Number(right.diameterPx!.toFixed(2));
-        const timestamp = new Date().toISOString();
+        // Schedule stimulus trigger when STABLE_DETECTION_MS is reached
+        if (stabilityTimerRef.current !== null) {
+          window.clearTimeout(stabilityTimerRef.current);
+        }
 
-        const record: Omit<PupilMeasurementRecord, 'id'> = {
-          timestamp,
-          left_pupil_px: leftPx,
-          right_pupil_px: rightPx,
-          status: 'DETECTED',
-          perf_timestamp_ms: performance.now(),
-        };
+        stabilityTimerRef.current = window.setTimeout(() => {
+          // Confirm state is still detecting before launching stimulus
+          if (stateRef.current === 'DETECTING') {
+            setWorkflowState('STABLE');
+            setStabilityProgress(100);
 
-        // Asynchronous non-blocking database insertion
-        pupilDatabase
-          .savePupilMeasurement(record)
-          .then(() => {
-            setPersistenceError(null);
-          })
-          .catch((err) => {
-            console.error('OptoPupil DB: Failed to persist measurement:', err);
-            setPersistenceError(err?.message || 'Failed to save measurement');
-          })
-          .finally(() => {
-            isWritingRef.current = false;
-            setIsSaving(false);
-          });
+            // Transition STABLE -> STIMULUS_ACTIVE
+            setWorkflowState('STIMULUS_ACTIVE');
+
+            startStimulus(STIMULUS_DURATION_MS, (stimulusTiming: StimulusTiming) => {
+              // On stimulus offset: CAPTURE & PERSIST measurement
+              const currentLeft = pupilDataRef.current.leftPupil;
+              const currentRight = pupilDataRef.current.rightPupil;
+
+              const canCapture =
+                typeof currentLeft.diameterPx === 'number' &&
+                Number.isFinite(currentLeft.diameterPx) &&
+                currentLeft.diameterPx > 0 &&
+                typeof currentRight.diameterPx === 'number' &&
+                Number.isFinite(currentRight.diameterPx) &&
+                currentRight.diameterPx > 0;
+
+              if (canCapture && !isWritingRef.current) {
+                isWritingRef.current = true;
+                setIsSaving(true);
+
+                const leftPx = Number(currentLeft.diameterPx!.toFixed(2));
+                const rightPx = Number(currentRight.diameterPx!.toFixed(2));
+                const timestamp = new Date().toISOString();
+
+                const record: Omit<PupilMeasurementRecord, 'id'> = {
+                  timestamp,
+                  left_pupil_px: leftPx,
+                  right_pupil_px: rightPx,
+                  status: 'DETECTED',
+                  perf_timestamp_ms: performance.now(),
+                  stimulus_onset_ms: stimulusTiming.stimulusOnsetTime,
+                  stimulus_offset_ms: stimulusTiming.stimulusOffsetTime,
+                  stimulus_duration_ms: stimulusTiming.actualDurationMs,
+                };
+
+                pupilDatabase
+                  .savePupilMeasurement(record)
+                  .then(() => {
+                    setPersistenceError(null);
+                    setWorkflowState('PERSISTED');
+                  })
+                  .catch((err) => {
+                    console.error('OptoPupil DB: Failed to persist measurement record:', err);
+                    setPersistenceError(err?.message || 'Failed to save measurement');
+                    setWorkflowState('PERSISTED');
+                  })
+                  .finally(() => {
+                    isWritingRef.current = false;
+                    setIsSaving(false);
+                  });
+              } else {
+                setWorkflowState('PERSISTED');
+              }
+            });
+          }
+        }, STABLE_DETECTION_MS);
+      } else if (stateRef.current === 'DETECTING' && detectionStartTimeRef.current !== null) {
+        // Update stability progress percentage
+        const elapsed = performance.now() - detectionStartTimeRef.current;
+        const progress = Math.min(100, Math.round((elapsed / STABLE_DETECTION_MS) * 100));
+        setStabilityProgress(progress);
       }
-      // If isSessionActiveRef.current is ALREADY true: do NOT create/update records on continuous frames!
+      // If stateRef.current is 'PERSISTED' or 'STIMULUS_ACTIVE': do not re-trigger!
     } else {
-      // Detection is lost or degraded
-      if (isSessionActiveRef.current) {
+      // Detection is lost or invalid
+      if (stateRef.current === 'DETECTING') {
+        // Lost detection before 1.0s stability completed -> cancel pending stimulus & reset
+        if (stabilityTimerRef.current !== null) {
+          window.clearTimeout(stabilityTimerRef.current);
+          stabilityTimerRef.current = null;
+        }
+        detectionStartTimeRef.current = null;
+        setWorkflowState('IDLE');
+        setStabilityProgress(0);
+      } else if (stateRef.current === 'PERSISTED') {
+        // In completed screening state: debounce lost frames before resetting to IDLE for next screening
         lostFramesCountRef.current += 1;
-        // Require sustained loss across multiple frames to officially close the session (debounce flicker)
         if (lostFramesCountRef.current >= LOST_FRAMES_COOLDOWN) {
-          isSessionActiveRef.current = false;
+          setWorkflowState('IDLE');
+          setStabilityProgress(0);
+          detectionStartTimeRef.current = null;
           lostFramesCountRef.current = 0;
         }
       }
     }
-  }, [pupilData, isActive]);
+  }, [pupilData, isActive, startStimulus, setWorkflowState]);
+
+  // Clean up timers on unmount
+  useEffect(() => {
+    return () => {
+      if (stabilityTimerRef.current !== null) {
+        window.clearTimeout(stabilityTimerRef.current);
+        stabilityTimerRef.current = null;
+      }
+    };
+  }, []);
 
   return {
     latestMeasurement,
@@ -179,6 +280,8 @@ export function useMeasurementPersistence({
     totalCount,
     isSaving,
     persistenceError,
+    screeningState,
+    stabilityProgress,
     refresh,
     clearHistory,
   };
