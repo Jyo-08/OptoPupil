@@ -3,6 +3,11 @@ import { useCamera } from '../camera/useCamera';
 import { useVisionPipeline } from '../hooks/useVisionPipeline';
 import { CameraView } from '../components/vision/CameraView';
 import { TrackingPanel } from '../components/vision/TrackingPanel';
+import {
+  useDisplayStimulus,
+  DisplayStimulusOverlay,
+  StimulusControlCard,
+} from '../stimulus';
 import { ArrowLeft, Play, Square, RefreshCw, Eye } from 'lucide-react';
 
 interface VisionPageProps {
@@ -38,6 +43,14 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
     isActive: cameraState.status === 'active',
   });
 
+  // Initialize Controlled Display Light Stimulus Controller
+  const {
+    isStimulusActive,
+    startStimulus,
+    lastTiming,
+    defaultDurationMs,
+  } = useDisplayStimulus();
+
   // Clean up camera on exit
   useEffect(() => {
     return () => {
@@ -46,7 +59,10 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
   }, [stopCamera]);
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+    <div className="relative mx-auto max-w-7xl px-4 py-6 sm:px-6">
+      {/* Full-Screen Pure White Controlled Light Stimulus Overlay */}
+      <DisplayStimulusOverlay isActive={isStimulusActive} />
+
       {/* Top Header / Stage Breadcrumb */}
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
@@ -100,7 +116,7 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
 
       {/* Main Grid: Responsive 2-Column on Desktop (1280x800), Stacked on Mobile (390x844) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left / Top: Live Camera & Landmark Overlay Viewport (7 cols) */}
+        {/* Left / Top: Live Camera & Landmark Overlay Viewport (8 cols) */}
         <div className="lg:col-span-8 flex flex-col gap-3">
           <CameraView
             videoRef={videoRef}
@@ -128,8 +144,15 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
           </div>
         </div>
 
-        {/* Right / Bottom: Pupil Metrics & Diagnostics Panel (4 cols) */}
-        <div className="lg:col-span-4">
+        {/* Right / Bottom: Light Stimulus Controller & Pupil Metrics (4 cols) */}
+        <div className="lg:col-span-4 flex flex-col gap-4">
+          <StimulusControlCard
+            isStimulusActive={isStimulusActive}
+            onStartStimulus={() => startStimulus()}
+            lastTiming={lastTiming}
+            defaultDurationMs={defaultDurationMs}
+          />
+
           <TrackingPanel
             tracking={tracking}
             pupilData={pupilData}
