@@ -30,3 +30,6 @@ dist-ssr
 .claude-flow/data/
 .claude-flow/logs/
 .claude-flow/sessions/
+
+# Machine Learning Local Data
+ml/data/

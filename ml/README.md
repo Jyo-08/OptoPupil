@@ -1,28 +1,50 @@
-# OptoPupil ML Workstream — Dataset Inspection & Analysis
+# OptoPupil ML Workstream — Phase 1: Data Cleaning & Validation
 
 ## 1. Overview
-This module contains isolated machine learning tooling, dataset inspection scripts, and verification reports for the **OptoPupil** neural pupil segmentation workstream.
+This module contains the machine learning data pipeline, dataset cleaning scripts, quality validation tooling, and statistical audit reports for the **OptoPupil** neural pupil segmentation workstream.
 
 ---
 
-## 2. Dataset Summary
+## 2. Pipeline Scripts & Tooling
 
-- **Source Directory**: `/Users/jyotish/Downloads/IRIS + PUPIL + EYE`
+```
+ml/
+├── clean_dataset.py        # Master cleaning & audit pipeline (hashes, anomaly detection, leakage, clean dataset export)
+├── validate_dataset.py     # Independent validation script verifying clean dataset compliance
+├── inspect_dataset.py      # Dataset inspection and multi-panel overlay visualization generator
+├── data/
+│   └── cleaned/            # Verified clean dataset copy (Original preserved untouched)
+│       ├── train/
+│       │   ├── image/             # 1,000 Grayscale PNGs (640×480)
+│       │   └── segmentation/      # 1,000 Single-channel integer masks (Classes 0, 1, 2, 3)
+│       └── val/
+│           ├── image/             # 275 Grayscale PNGs (640×480)
+│           └── segmentation/      # 275 Single-channel integer masks (Classes 0, 1, 2, 3)
+└── reports/
+    ├── dataset_cleaning_report.md   # 16-section comprehensive audit report
+    ├── dataset_cleaning_report.json # Structured machine-readable metrics & anomaly logs
+    ├── dataset_inspection_report.json
+    └── dataset_inspection_samples.png
+```
+
+---
+
+## 3. Dataset Summary
+
+- **Source Directory (Untouched)**: `/Users/jyotish/Downloads/IRIS + PUPIL + EYE`
+- **Cleaned Dataset Directory**: `ml/data/cleaned/`
 - **Total Training Pairs**: 1,000 images + 1,000 segmentation masks
 - **Total Validation Pairs**: 275 images + 275 segmentation masks
-- **Total Dataset Pairs**: 1,275 pairs
-- **Image Resolution**: 640 × 480 (Width × Height)
-- **Mask Resolution**: 640 × 480 (Width × Height)
+- **Total Dataset Pairs**: 1,275 pairs (100% paired, 0 missing, 0 orphans)
+- **Resolution**: 640 × 480 (Width × Height)
 - **Image Mode**: 8-bit Grayscale (PIL mode `L`, numpy shape `(480, 640)`)
 - **Mask Mode**: 8-bit Discrete Class Labels (PIL mode `L`, numpy shape `(480, 640)`)
 - **Corrupted / Unreadable Files**: 0
-- **Missing / Mismatched Files**: 0 (100% 1-to-1 matching across train and val splits)
+- **Integrity Compliance**: 100.0%
 
 ---
 
-## 3. Mask Class Encoding & Anatomical Mapping
-
-Through spatial topology, bounding-box geometry, and image intensity correlation, the discrete pixel values in the single-channel masks are mapped as follows:
+## 4. Mask Class Encoding & Anatomical Mapping
 
 | Class Value | Anatomical Region | Image Intensity Characteristics | Train % | Val % |
 | :--- | :--- | :--- | :--- | :--- |
@@ -33,18 +55,30 @@ Through spatial topology, bounding-box geometry, and image intensity correlation
 
 ---
 
-## 4. Class Imbalance Analysis
-- **Pupil Class Proportion**: ~4.8% of total frame pixels.
-- **Background + Sclera Dominance**: Background accounts for ~67.3% and Sclera ~18.0%.
-- **Imbalance Significance**: Significant class imbalance exists between background and the pupil target.
-- **Loss Recommendation**: Training will require compound loss functions such as **Focal Tversky Loss** or combined **Dice Loss + Weighted Cross-Entropy** to prevent the background class from dominating gradients.
+## 5. Quality Audit & Leakage Findings
+
+1. **Non-Image Artifact Filtering**: Filtered 1 non-image Windows artifact (`desktop.ini`) in train folder.
+2. **File & Mask Integrity**: 100% of images and masks are valid PNGs with matching $640 \times 480$ dimensions.
+3. **Class Label Conformance**: All mask pixels belong strictly to $\{0, 1, 2, 3\}$. Zero invalid or continuous values.
+4. **Duplicate Analysis**: 0 exact duplicate pairs found within train or val splits.
+5. **Cross-Split Leakage Analysis**: 0 exact cross-split matches; 5 perceptual near-duplicate pairs (dHash Hamming $\le 2$) flagged and logged for tracking.
+6. **Flagged for Manual Review**: 212 samples flagged for extreme boundary proximity or extreme pupil/iris area ratios (preserved in clean copy without deletion).
 
 ---
 
-## 5. ML Readiness & Next Steps
-- **Data Quality**: High. No corruptions, uniform 480×640 dimensions, pristine 1:1 filename matching.
-- **Model Architecture Recommendation**: Lightweight U-Net or MobileNetV3-UNet / SegFormer operating on eye ROIs or resized frames (e.g., $256 \times 256$ or $384 \times 288$).
-- **Target Formulation**:
-  - Multiclass segmentation (Classes 0, 1, 2, 3) provides anatomical regularization (learning eye and iris boundaries improves pupil localization).
-  - Alternatively, a binary pupil mask `(mask == 2).astype(float)` can be extracted for ultra-low latency inference.
-- **Next Phase**: Model architecture definition and isolated training pipeline development (PyTorch / ONNX / TFLite export for web integration).
+## 6. How to Run
+
+### Execute Dataset Cleaning Pipeline:
+```bash
+python3 ml/clean_dataset.py
+```
+
+### Validate Cleaned Dataset Compliance:
+```bash
+python3 ml/validate_dataset.py
+```
+
+---
+
+## 7. Next Phase: Model Architecture & Preprocessing (Phase 2)
+The dataset is **READY FOR PREPROCESSING**. Phase 2 will implement PyTorch Dataset loaders, dynamic ROI cropping, contrast normalization, and model training (U-Net / SegFormer).
