@@ -1,7 +1,8 @@
-import { ExtractedOcularData, EyeLandmarkSet, IrisLandmarkSet } from '../../types/vision';
+import { ExtractedOcularData, EyeLandmarkSet, IrisLandmarkSet, BilateralPupilData } from '../../types/vision';
 import { NeuralPupilSegmenter } from './NeuralPupilSegmenter';
 import { PupilGeometryExtractor, PupilGeometryResult } from './PupilGeometryExtractor';
 import { ONNXRuntimeService } from './ONNXRuntimeService';
+import { NeuralPupilComparison } from './NeuralPupilComparison';
 
 export interface NeuralPupilGeometry extends PupilGeometryResult {
     videoCentroidX: number;
@@ -49,7 +50,7 @@ export class LiveNeuralPupilPipeline {
      * Non-blocking entry point for the shadow pipeline.
      * Skips the frame if an inference batch is already in flight.
      */
-    public async processFrame(video: HTMLVideoElement, ocularData: ExtractedOcularData, timestamp: number): Promise<void> {
+    public async processFrame(video: HTMLVideoElement, ocularData: ExtractedOcularData, deterministicData: BilateralPupilData, timestamp: number): Promise<void> {
         if (this.isInferring) {
             return;
         }
@@ -81,7 +82,8 @@ export class LiveNeuralPupilPipeline {
             };
 
             if (valid) {
-                this.logShadowResult(result);
+                // Pass to comparison validation layer
+                NeuralPupilComparison.getInstance().compare(timestamp, deterministicData, result);
             }
         } finally {
             this.isInferring = false;
@@ -159,21 +161,5 @@ export class LiveNeuralPupilPipeline {
             videoCentroidX,
             videoCentroidY
         };
-    }
-
-    private logShadowResult(result: NeuralShadowResult) {
-        const now = performance.now();
-        // Throttle debug logging to ~1Hz to avoid console spam
-        if (now - this.lastLogTime > 1000) {
-            this.lastLogTime = now;
-            console.log(
-                `%cNEURAL SHADOW (%c${result.processingTimeMs.toFixed(1)}ms%c)\n` +
-                `Left:  valid=${result.left?.valid}, center=(${result.left?.videoCentroidX?.toFixed(1)}, ${result.left?.videoCentroidY?.toFixed(1)}), diam=${result.left?.equivalentDiameterPx?.toFixed(1)}, circ=${result.left?.circularity?.toFixed(2)}\n` +
-                `Right: valid=${result.right?.valid}, center=(${result.right?.videoCentroidX?.toFixed(1)}, ${result.right?.videoCentroidY?.toFixed(1)}), diam=${result.right?.equivalentDiameterPx?.toFixed(1)}, circ=${result.right?.circularity?.toFixed(2)}`,
-                'color: #a855f7; font-weight: bold;',
-                'color: #eab308; font-weight: normal;',
-                'color: inherit;'
-            );
-        }
     }
 }

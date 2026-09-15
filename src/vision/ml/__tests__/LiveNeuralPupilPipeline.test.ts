@@ -82,6 +82,19 @@ vi.mock('../ONNXRuntimeService', () => {
     };
 });
 
+vi.mock('../NeuralPupilComparison', () => {
+    class MockComparison {
+        compare = vi.fn();
+        reset = vi.fn();
+    }
+    const instance = new MockComparison();
+    return {
+        NeuralPupilComparison: {
+            getInstance: () => instance
+        }
+    };
+});
+
 describe('LiveNeuralPupilPipeline', () => {
     let videoMock: HTMLVideoElement;
     let pipeline: LiveNeuralPupilPipeline;
@@ -131,7 +144,8 @@ describe('LiveNeuralPupilPipeline', () => {
         data.rightEye = null;
         data.rightIris = null;
 
-        await pipeline.processFrame(videoMock, data, 1000);
+        const fakeDet = { leftPupil: { detected: false }, rightPupil: { detected: false } };
+        await pipeline.processFrame(videoMock, data, fakeDet as any, 1000);
 
         expect(mockDrawImage).toHaveBeenCalled();
         const args = mockDrawImage.mock.calls[0];
@@ -151,13 +165,14 @@ describe('LiveNeuralPupilPipeline', () => {
         const data = createFakeOcularData(0.5, 0.5, 0.1);
         data.rightEye = null;
         data.rightIris = null;
+
+        const fakeDet = { leftPupil: { detected: false }, rightPupil: { detected: false } };
         
-        const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        // We will spy on NeuralPupilComparison.getInstance().compare
+        const { NeuralPupilComparison } = await import('../NeuralPupilComparison');
+        const compareSpy = vi.spyOn(NeuralPupilComparison.getInstance(), 'compare');
 
-        // Mock performance.now to ensure it triggers the throttle log condition
-        vi.spyOn(performance, 'now').mockReturnValue(5000);
-
-        await pipeline.processFrame(videoMock, data, 1000);
+        await pipeline.processFrame(videoMock, data, fakeDet as any, 1000);
 
         // Crop is 320x240, starting at (480, 240).
         // scaleX = 320 / 256 = 1.25
@@ -165,23 +180,27 @@ describe('LiveNeuralPupilPipeline', () => {
         // expected videoX = 480 + 128 * 1.25 = 480 + 160 = 640
         // expected videoY = 240 + 96 * 1.25 = 240 + 120 = 360
 
-        expect(consoleSpy).toHaveBeenCalled();
-        const logMsg = consoleSpy.mock.calls[0][0];
-        expect(logMsg).toContain('center=(640.0, 360.0)');
+        expect(compareSpy).toHaveBeenCalled();
+        const calledArgs = compareSpy.mock.calls[0];
+        // calledArgs[2] is the NeuralShadowResult
+        expect(calledArgs[2].left?.videoCentroidX).toBeCloseTo(640);
+        expect(calledArgs[2].left?.videoCentroidY).toBeCloseTo(360);
     });
 
     it('should return safely for out-of-bounds crops without NaN or Infinity', async () => {
         const data = createFakeOcularData(0, 0, 0.2); 
         const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-        await pipeline.processFrame(videoMock, data, 1000);
+        const fakeDet = { leftPupil: { detected: false }, rightPupil: { detected: false } };
+        await pipeline.processFrame(videoMock, data, fakeDet as any, 1000);
         expect(consoleSpy).not.toHaveBeenCalled();
     });
 
     it('should process both left and right eyes independently from the same timestamp', async () => {
         const data = createFakeOcularData(0.5, 0.5, 0.1);
 
-        await pipeline.processFrame(videoMock, data, 1000);
+        const fakeDet = { leftPupil: { detected: false }, rightPupil: { detected: false } };
+        await pipeline.processFrame(videoMock, data, fakeDet as any, 1000);
         expect(mockDrawImage).toHaveBeenCalledTimes(2);
     });
 
@@ -192,12 +211,13 @@ describe('LiveNeuralPupilPipeline', () => {
 
         mocks.useSlowSegmenter = true;
 
-        const p1 = pipeline.processFrame(videoMock, data, 1000);
+        const fakeDet = { leftPupil: { detected: false }, rightPupil: { detected: false } };
+        const p1 = pipeline.processFrame(videoMock, data, fakeDet as any, 1000);
         
         // Wait a tiny bit to ensure p1 has engaged isInferring
         await new Promise(r => setTimeout(r, 10));
 
-        const p2 = pipeline.processFrame(videoMock, data, 1016);
+        const p2 = pipeline.processFrame(videoMock, data, fakeDet as any, 1016);
 
         await p2; // Should resolve immediately because of throttle
         expect((pipeline as any).isInferring).toBe(true); 

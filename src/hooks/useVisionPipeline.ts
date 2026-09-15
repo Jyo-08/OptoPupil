@@ -137,7 +137,7 @@ export function useVisionPipeline({
         );
 
         // 5b. Shadow Mode Neural Pipeline (Async, Non-blocking)
-        LiveNeuralPupilPipeline.getInstance().processFrame(video, ocularData, now).catch((err) => {
+        LiveNeuralPupilPipeline.getInstance().processFrame(video, ocularData, pupilData, now).catch((err) => {
           console.warn('LiveNeuralPupilPipeline error:', err);
         });
 
