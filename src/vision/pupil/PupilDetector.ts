@@ -24,8 +24,8 @@ export class PupilDetector {
 
   /**
    * Detect pupil geometry inside the dynamic eye/iris region of interest (ROI).
-   * Uses connected-component region growing, specular glint inpainting,
-   * seed-relative adaptive thresholding, and sub-pixel moment fitting.
+   * Operates strictly on real webcam frames using adaptive intensity segmentation,
+   * connected-component localization, and sub-pixel moment fitting.
    */
   public static detectPupil(
     video: HTMLVideoElement,
@@ -55,17 +55,17 @@ export class PupilDetector {
     };
     const irisRadiusPx = iris.estimatedRadiusNorm * Math.min(videoW, videoH);
 
-    // If iris radius is too small (< 6px), detection is unreliable
-    if (irisRadiusPx < 6) {
+    // If iris radius is too small (< 4px), camera is too far or eye is closed
+    if (irisRadiusPx < 4) {
       return {
         ...defaultLost,
-        status: 'UNCERTAIN',
+        status: 'LOST',
       };
     }
 
-    // Dynamic Iris ROI bounding box (2.4x iris radius)
+    // Dynamic Iris ROI bounding box (2.6x iris radius to ensure pupil is fully contained)
     const roiSize = Math.min(
-      Math.max(Math.ceil(irisRadiusPx * 2.4), 24),
+      Math.max(Math.ceil(irisRadiusPx * 2.6), 28),
       Math.min(videoW, videoH)
     );
     const roiX = Math.max(0, Math.min(Math.floor(irisCenterPx.x - roiSize / 2), videoW - roiSize));
@@ -86,24 +86,27 @@ export class PupilDetector {
     const localIrisCenterX = irisCenterPx.x - roiX;
     const localIrisCenterY = irisCenterPx.y - roiY;
 
-    // Step 1: Extract grayscale luminance & collect smoothed array
+    // Step 1: Extract grayscale luminance & collect iris pixel intensities
     const gray = new Float32Array(roiSize * roiSize);
     const smoothed = new Float32Array(roiSize * roiSize);
     const irisRadiusSq = irisRadiusPx * irisRadiusPx;
-    const coreRadiusSq = (irisRadiusPx * 0.38) * (irisRadiusPx * 0.38);
-    const stromaInnerRadiusSq = (irisRadiusPx * 0.48) * (irisRadiusPx * 0.48);
-    const stromaOuterRadiusSq = (irisRadiusPx * 0.88) * (irisRadiusPx * 0.88);
+    const searchRadiusSq = (irisRadiusPx * 0.55) * (irisRadiusPx * 0.55);
+
+    let minCoreLum = 255;
+    let seedX = Math.round(localIrisCenterX);
+    let seedY = Math.round(localIrisCenterY);
 
     for (let y = 0; y < roiSize; y++) {
       const rowOffset = y * roiSize;
       for (let x = 0; x < roiSize; x++) {
         const idx = (rowOffset + x) * 4;
         // Standard perceptual luminance: 0.299R + 0.587G + 0.114B
-        gray[rowOffset + x] = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+        const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+        gray[rowOffset + x] = lum;
       }
     }
 
-    // 3x3 local Gaussian-like smoothing to suppress sensor grain
+    // 3x3 local smoothing
     for (let y = 1; y < roiSize - 1; y++) {
       const rowOffset = y * roiSize;
       for (let x = 1; x < roiSize - 1; x++) {
@@ -115,11 +118,11 @@ export class PupilDetector {
       }
     }
 
-    // Step 2: Find the dark pupil core seed within central iris zone
-    let minCoreLum = 255;
-    let seedX = Math.round(localIrisCenterX);
-    let seedY = Math.round(localIrisCenterY);
+    // Step 2: Sample intensities inside iris and locate darkest seed
+    const irisIntensities: number[] = [];
     const stromaIntensities: number[] = [];
+    const stromaInnerSq = (irisRadiusPx * 0.40) * (irisRadiusPx * 0.40);
+    const stromaOuterSq = (irisRadiusPx * 0.95) * (irisRadiusPx * 0.95);
 
     for (let y = 1; y < roiSize - 1; y++) {
       const rowOffset = y * roiSize;
@@ -129,10 +132,13 @@ export class PupilDetector {
       for (let x = 1; x < roiSize - 1; x++) {
         const dx = x - localIrisCenterX;
         const distSq = dx * dx + dySq;
-        const lum = smoothed[rowOffset + x];
+        if (distSq > irisRadiusSq) continue;
 
-        // Central core for pupil seed
-        if (distSq <= coreRadiusSq) {
+        const lum = smoothed[rowOffset + x];
+        irisIntensities.push(lum);
+
+        // Dark seed search within central 55% of iris
+        if (distSq <= searchRadiusSq) {
           if (lum < minCoreLum) {
             minCoreLum = lum;
             seedX = x;
@@ -140,35 +146,37 @@ export class PupilDetector {
           }
         }
 
-        // Surrounding iris ring for stroma baseline
-        if (distSq >= stromaInnerRadiusSq && distSq <= stromaOuterRadiusSq) {
+        // Stroma ring sample
+        if (distSq >= stromaInnerSq && distSq <= stromaOuterSq) {
           stromaIntensities.push(lum);
         }
       }
     }
 
-    if (stromaIntensities.length < 15 || minCoreLum > 180) {
-      return {
-        ...defaultLost,
-        status: 'UNCERTAIN',
-      };
+    if (irisIntensities.length < 15) {
+      return defaultLost;
     }
 
-    // Step 3: Compute robust stroma contrast and adaptive threshold
+    // Step 3: Robust Adaptive Threshold
     stromaIntensities.sort((a, b) => a - b);
-    const medianStroma = stromaIntensities[Math.floor(stromaIntensities.length * 0.5)];
-    const contrastRatio = (medianStroma - minCoreLum) / 255;
+    irisIntensities.sort((a, b) => a - b);
 
-    // If pupil core is not significantly darker than iris stroma, return uncertain
-    if (contrastRatio < 0.05) {
-      return {
-        ...defaultLost,
-        status: 'UNCERTAIN',
-      };
+    const medianStroma = stromaIntensities.length > 0
+      ? stromaIntensities[Math.floor(stromaIntensities.length * 0.5)]
+      : irisIntensities[Math.floor(irisIntensities.length * 0.75)];
+
+    const minIrisLum = irisIntensities[0];
+    const lumDelta = medianStroma - minIrisLum;
+    const contrastRatio = Math.max(0, lumDelta / 255);
+
+    // Adaptive threshold calculation
+    let adaptiveThreshold: number;
+    if (lumDelta > 10) {
+      adaptiveThreshold = minIrisLum + lumDelta * 0.48 + 3;
+    } else {
+      // Low contrast fallback
+      adaptiveThreshold = minIrisLum + 6;
     }
-
-    // Dynamic adaptive threshold relative to core seed and stroma baseline
-    const adaptiveThreshold = minCoreLum + (medianStroma - minCoreLum) * 0.44 + 4;
 
     // Step 4: 8-Connected Component Region Growing from Seed + Glint Inpainting
     const visited = new Uint8Array(roiSize * roiSize);
@@ -185,7 +193,7 @@ export class PupilDetector {
     queueY[tail] = seedY;
     tail++;
 
-    const maxPupilRadius = irisRadiusPx * 0.72;
+    const maxPupilRadius = irisRadiusPx * 0.78;
     const maxPupilRadiusSq = maxPupilRadius * maxPupilRadius;
 
     while (head < tail) {
@@ -193,7 +201,6 @@ export class PupilDetector {
       const qy = queueY[head];
       head++;
 
-      // 8-neighborhood expansion
       for (let ny = qy - 1; ny <= qy + 1; ny++) {
         if (ny < 1 || ny >= roiSize - 1) continue;
         const nRowOffset = ny * roiSize;
@@ -210,11 +217,10 @@ export class PupilDetector {
           const distSq = dx * dx + dySq;
           if (distSq > irisRadiusSq || distSq > maxPupilRadiusSq) continue;
 
-          // Connect pixel if dark or if near seed (glint inpainting check)
           const lum = smoothed[nOffset];
           const isDark = lum <= adaptiveThreshold;
-          // Glint inpainting: small bright reflection inside the inner core
-          const isGlint = !isDark && distSq <= (irisRadiusPx * 0.3) * (irisRadiusPx * 0.3) && lum > 160;
+          // Glint inpainting: include enclosed reflection pixels inside central zone
+          const isGlint = !isDark && distSq <= (irisRadiusPx * 0.35) * (irisRadiusPx * 0.35) && lum > 140;
 
           if (isDark || isGlint) {
             inPupil[nOffset] = 1;
@@ -226,15 +232,39 @@ export class PupilDetector {
       }
     }
 
-    const countDark = tail;
-    if (countDark < 6) {
+    let countDark = tail;
+
+    // Fallback: If flood fill got fewer than 4 pixels, use simple radius search around seed
+    if (countDark < 4) {
+      tail = 0;
+      for (let y = 1; y < roiSize - 1; y++) {
+        const rowOffset = y * roiSize;
+        const dy = y - seedY;
+        const dySq = dy * dy;
+        for (let x = 1; x < roiSize - 1; x++) {
+          const dx = x - seedX;
+          const distSq = dx * dx + dySq;
+          if (distSq <= (irisRadiusPx * 0.35) * (irisRadiusPx * 0.35)) {
+            const lum = smoothed[rowOffset + x];
+            if (lum <= adaptiveThreshold + 4) {
+              queueX[tail] = x;
+              queueY[tail] = y;
+              tail++;
+            }
+          }
+        }
+      }
+      countDark = tail;
+    }
+
+    if (countDark < 3) {
       return {
         ...defaultLost,
         status: 'UNCERTAIN',
       };
     }
 
-    // Step 5: Sub-Pixel Centroid & Central Moments on Connected Pupil Component
+    // Step 5: Sub-Pixel Intensity-Weighted Centroid
     let sumW = 0;
     let sumX = 0;
     let sumY = 0;
@@ -244,15 +274,14 @@ export class PupilDetector {
       const py = queueY[i];
       const offset = py * roiSize + px;
       const lum = smoothed[offset];
-      // Intensity weighting: darker pixels exert higher pull on the centroid
       const w = Math.max(1, adaptiveThreshold - lum + 10);
       sumW += w;
       sumX += px * w;
       sumY += py * w;
     }
 
-    const candidateLocalX = sumX / sumW;
-    const candidateLocalY = sumY / sumW;
+    const candidateLocalX = sumW > 0 ? sumX / sumW : seedX;
+    const candidateLocalY = sumW > 0 ? sumY / sumW : seedY;
 
     // Convert candidate centroid to native video pixel space
     const candidateVideoX = roiX + candidateLocalX;
@@ -271,8 +300,8 @@ export class PupilDetector {
       m11 += dx * dy;
     }
 
-    // Continuous equivalent circular radius: A = countDark => r = sqrt(A / pi)
-    const equivalentRadiusPx = Math.sqrt(countDark / Math.PI);
+    // Equivalent circular radius: A = countDark => r = sqrt(A / pi)
+    const equivalentRadiusPx = Math.max(1.5, Math.sqrt(countDark / Math.PI));
     const equivalentDiameterPx = equivalentRadiusPx * 2;
 
     // Major / minor axes from moments
@@ -285,35 +314,32 @@ export class PupilDetector {
     const angleRad = 0.5 * Math.atan2(2 * u11, u20 - u02);
 
     // Step 6: Candidate Validation Heuristics
-    // Criterion A: Distance from Iris Center
     const offsetFromIrisX = candidateVideoX - irisCenterPx.x;
     const offsetFromIrisY = candidateVideoY - irisCenterPx.y;
     const distFromIrisCenter = Math.sqrt(offsetFromIrisX * offsetFromIrisX + offsetFromIrisY * offsetFromIrisY);
-    const maxAllowedOffset = irisRadiusPx * 0.40;
+    const maxAllowedOffset = irisRadiusPx * 0.55;
 
-    // Criterion B: Physiological size ratio (pupil radius 14% - 72% of iris radius)
     const radiusRatio = equivalentRadiusPx / irisRadiusPx;
-    const isSizePlausible = radiusRatio >= 0.14 && radiusRatio <= 0.72;
+    const isSizePlausible = radiusRatio >= 0.10 && radiusRatio <= 0.80;
 
-    // Criterion C: Elliptical shape regularity (minor / major axis ratio >= 0.45)
     const axisRatio = minorAxisPx / majorAxisPx;
     const circularityScore = Math.min(1, Math.max(0, axisRatio));
-    const isShapePlausible = axisRatio >= 0.45;
 
     // Determine Detection Status
     let status: PupilGeometry['status'] = 'DETECTED';
     let detected = true;
 
     if (distFromIrisCenter > maxAllowedOffset || !isSizePlausible) {
-      if (distFromIrisCenter > maxAllowedOffset * 1.3 || radiusRatio < 0.10 || radiusRatio > 0.85) {
+      if (distFromIrisCenter > irisRadiusPx * 0.9 || radiusRatio < 0.06 || radiusRatio > 0.95) {
         status = 'LOST';
         detected = false;
       } else {
         status = 'UNCERTAIN';
-        detected = false;
+        detected = true; // Still provide the measurement even if uncertain
       }
-    } else if (!isShapePlausible || contrastRatio < 0.08) {
+    } else if (contrastRatio < 0.03 || circularityScore < 0.30) {
       status = 'UNCERTAIN';
+      detected = true;
     }
 
     if (!detected && status === 'LOST') {

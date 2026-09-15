@@ -7,18 +7,14 @@ export interface StabilizerConfig {
    */
   alpha: number;
   /**
-   * Number of consecutive lost frames before transitioning from UNCERTAIN to LOST.
-   * Default: 3 frames.
+   * Number of consecutive lost frames before transitioning to LOST.
+   * Default: 4 frames.
    */
   lossFrameThreshold: number;
   /**
    * Maximum allowed frame-to-frame position jump in normalized space before flagging as jump artifact.
    */
   maxNormalizedJump: number;
-  /**
-   * Maximum single-frame diameter ratio change allowed before flagging as an outlier.
-   */
-  maxDiameterRatioJump: number;
   /**
    * Rolling window size for quantitative stability statistics.
    */
@@ -27,9 +23,8 @@ export interface StabilizerConfig {
 
 const DEFAULT_CONFIG: StabilizerConfig = {
   alpha: 0.65,
-  lossFrameThreshold: 3,
-  maxNormalizedJump: 0.08,
-  maxDiameterRatioJump: 0.22,
+  lossFrameThreshold: 4,
+  maxNormalizedJump: 0.12,
   statsWindowSize: 60,
 };
 
@@ -45,50 +40,37 @@ export class SinglePupilStabilizer {
   }
 
   public process(raw: PupilGeometry): PupilGeometry {
-    // Case 1: Raw pupil is validly DETECTED
-    if (raw.detected && raw.centerPx && raw.radiusPx && raw.centerNorm && raw.diameterPx) {
+    // Case 1: Valid numeric pupil diameter is present
+    if (raw.diameterPx !== null && raw.diameterPx > 0 && raw.centerPx && raw.radiusPx && raw.centerNorm) {
       this.consecutiveLostFrames = 0;
       this.consecutiveValidFrames++;
 
-      // If we just recovered from loss or this is the first frame, reset to raw directly
-      if (!this.prevStabilized || !this.prevStabilized.detected || this.consecutiveValidFrames === 1) {
+      // First valid frame or recovering from loss: adopt raw measurement directly
+      if (!this.prevStabilized || !this.prevStabilized.diameterPx || this.consecutiveValidFrames === 1) {
         this.addStatSample(raw.diameterPx);
         const initialStabilized: PupilGeometry = {
           ...raw,
-          status: 'DETECTED',
           stability: this.calculateStats(),
         };
         this.prevStabilized = initialStabilized;
         return initialStabilized;
       }
 
-      // Check for sudden spatial and diameter outlier jumps
+      // Check for spatial jump
       const prevNorm = this.prevStabilized.centerNorm;
-      const prevDiameter = this.prevStabilized.diameterPx;
-      let isOutlier = false;
+      let isJump = false;
 
-      if (prevNorm && prevDiameter) {
+      if (prevNorm) {
         const dx = raw.centerNorm.x - prevNorm.x;
         const dy = raw.centerNorm.y - prevNorm.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        const diameterRatio = Math.abs(raw.diameterPx - prevDiameter) / prevDiameter;
-
-        if (dist > this.config.maxNormalizedJump || diameterRatio > this.config.maxDiameterRatioJump) {
-          isOutlier = true;
+        if (dist > this.config.maxNormalizedJump) {
+          isJump = true;
         }
       }
 
-      // If outlier on single frame, treat as UNCERTAIN without corrupting baseline
-      if (isOutlier && this.consecutiveValidFrames < 3) {
-        return {
-          ...raw,
-          status: 'UNCERTAIN',
-          stability: this.calculateStats(),
-        };
-      }
-
-      // Apply Exponential Moving Average (EMA) smoothing
-      const a = isOutlier ? 0.85 : this.config.alpha;
+      // Adaptive smoothing: faster response on large transitions, smoother on stationary gaze
+      const a = isJump ? 0.85 : this.config.alpha;
       const smoothedRadiusPx =
         this.prevStabilized.radiusPx !== null
           ? a * raw.radiusPx + (1 - a) * this.prevStabilized.radiusPx
@@ -119,8 +101,8 @@ export class SinglePupilStabilizer {
       this.addStatSample(smoothedDiameterPx);
 
       const stabilized: PupilGeometry = {
-        detected: true,
-        status: 'DETECTED',
+        detected: raw.detected,
+        status: raw.status,
         centerPx: { x: smoothedPxX, y: smoothedPxY },
         centerNorm: { x: smoothedNormX, y: smoothedNormY, z: 0 },
         radiusPx: smoothedRadiusPx,
@@ -137,14 +119,14 @@ export class SinglePupilStabilizer {
       return stabilized;
     }
 
-    // Case 2: Detection failed (Blink, eye closed, or loss)
+    // Case 2: No valid measurement in raw frame (Blink, eye closed, or tracking lost)
     this.consecutiveLostFrames++;
     this.consecutiveValidFrames = 0;
 
     const status: PupilGeometry['status'] =
       this.consecutiveLostFrames <= this.config.lossFrameThreshold ? 'UNCERTAIN' : 'LOST';
 
-    // Do NOT freeze old measurements as if they were current measurements!
+    // When detection is genuinely lost, diameter is null (no fake values!)
     const lostStabilized: PupilGeometry = {
       detected: false,
       status,
@@ -160,6 +142,7 @@ export class SinglePupilStabilizer {
   }
 
   private addStatSample(diameter: number): void {
+    if (isNaN(diameter) || diameter <= 0) return;
     this.recentDiameters.push(diameter);
     if (this.recentDiameters.length > this.config.statsWindowSize) {
       this.recentDiameters.shift();
