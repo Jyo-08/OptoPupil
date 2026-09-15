@@ -154,20 +154,19 @@ export const PLRWaveformChart: React.FC<PLRWaveformChartProps> = ({
               />
 
               {/* Light Stimulus Active Zone Highlight (0 to 200ms) */}
-              <ReferenceArea
-                x1={0}
-                x2={200}
-                stroke="rgba(250, 204, 21, 0.4)"
-                strokeOpacity={0.5}
-                fill="rgba(250, 204, 21, 0.12)"
-                label={{
+              {React.createElement(ReferenceArea as any, {
+                x1: 0,
+                x2: 200,
+                stroke: 'rgba(250, 204, 21, 0.4)',
+                fill: 'rgba(250, 204, 21, 0.12)',
+                label: {
                   value: 'LIGHT FLASH',
                   fill: '#facc15',
                   fontSize: 9,
                   position: 'insideTop',
                   fontFamily: 'monospace',
-                }}
-              />
+                },
+              })}
 
               {/* Stimulus Onset Line (t = 0) */}
               <ReferenceLine
