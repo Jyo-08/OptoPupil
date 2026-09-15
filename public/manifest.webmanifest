@@ -1,0 +1,17 @@
+{
+  "name": "OptoPupil",
+  "short_name": "OptoPupil",
+  "description": "Zero-Hardware Quantitative Pupillary Light Reflex Screening",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070a11",
+  "theme_color": "#06b6d4",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
