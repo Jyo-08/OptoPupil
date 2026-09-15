@@ -5,6 +5,7 @@ import { EyeExtractor } from '../vision/eyes/EyeExtractor';
 import { PupilDetector } from '../vision/pupil/PupilDetector';
 import { BilateralPupilStabilizer } from '../vision/pupil/PupilStabilizer';
 import { TrackingEvaluator } from '../vision/tracking/TrackingEvaluator';
+import { LiveNeuralPupilPipeline } from '../vision/ml/LiveNeuralPupilPipeline';
 import type {
   NormalizedLandmark,
   ExtractedOcularData,
@@ -134,6 +135,11 @@ export function useVisionPipeline({
           ocularData,
           currentFpsRef.current
         );
+
+        // 5b. Shadow Mode Neural Pipeline (Async, Non-blocking)
+        LiveNeuralPupilPipeline.getInstance().processFrame(video, ocularData, now).catch((err) => {
+          console.warn('LiveNeuralPupilPipeline error:', err);
+        });
 
         // 6. Direct Canvas Rendering (Zero React State Overhead)
         if (canvas) {
