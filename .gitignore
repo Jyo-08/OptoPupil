@@ -27,9 +27,13 @@ dist-ssr
 .env
 .env.local
 .env.*.local
-.claude-flow/data/
-.claude-flow/logs/
-.claude-flow/sessions/
+# Local Agent Tooling & State
+.agents/
+.claude/
+.claude-flow/
+.swarm/
+.mcp.json
+CLAUDE.md
 
 # Machine Learning Local Data & Virtual Environments
 ml/data/

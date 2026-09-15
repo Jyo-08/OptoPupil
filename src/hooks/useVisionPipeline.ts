@@ -53,6 +53,7 @@ export function useVisionPipeline({
   const animFrameIdRef = useRef<number | null>(null);
   const lastVideoTimeRef = useRef<number>(-1);
   const lastUiUpdateRef = useRef<number>(0);
+  const lastDiagLogRef = useRef<number>(0);
   const frameCountRef = useRef<number>(0);
   const fpsTimerRef = useRef<number>(performance.now());
   const currentFpsRef = useRef<number>(0);
@@ -160,6 +161,33 @@ export function useVisionPipeline({
           lastUiUpdateRef.current = now;
           setTrackingUiState(trackingQuality);
           setPupilUiState(pupilData);
+        }
+
+        // 8. Throttled Diagnostic Logging (~1 Hz)
+        if (now - lastDiagLogRef.current >= 1000) {
+          lastDiagLogRef.current = now;
+          const leftEyeValid = ocularData.leftEye !== null && ocularData.leftIris !== null;
+          const rightEyeValid = ocularData.rightEye !== null && ocularData.rightIris !== null;
+          const bothEyesValid = leftEyeValid && rightEyeValid;
+
+          console.log(
+            `[OPTOPUPIL VISION DIAGNOSTICS]\n` +
+            `FACE:\n` +
+            `- face detected: ${trackingQuality.faceDetected ? 'yes' : 'no'}\n` +
+            `- landmark count: ${landmarks ? landmarks.length : 0}\n\n` +
+            `LEFT EYE:\n` +
+            `- landmark count: ${ocularData.leftEye ? ocularData.leftEye.contour.length : 0}\n` +
+            `- bounding box: ${ocularData.leftEye ? `[minX: ${ocularData.leftEye.boundingBox.minX.toFixed(3)}, minY: ${ocularData.leftEye.boundingBox.minY.toFixed(3)}, maxX: ${ocularData.leftEye.boundingBox.maxX.toFixed(3)}, maxY: ${ocularData.leftEye.boundingBox.maxY.toFixed(3)}]` : 'none'}\n` +
+            `- iris detected: ${ocularData.leftIris ? 'yes' : 'no'}\n\n` +
+            `RIGHT EYE:\n` +
+            `- landmark count: ${ocularData.rightEye ? ocularData.rightEye.contour.length : 0}\n` +
+            `- bounding box: ${ocularData.rightEye ? `[minX: ${ocularData.rightEye.boundingBox.minX.toFixed(3)}, minY: ${ocularData.rightEye.boundingBox.minY.toFixed(3)}, maxX: ${ocularData.rightEye.boundingBox.maxX.toFixed(3)}, maxY: ${ocularData.rightEye.boundingBox.maxY.toFixed(3)}]` : 'none'}\n` +
+            `- iris detected: ${ocularData.rightIris ? 'yes' : 'no'}\n\n` +
+            `TRACKING:\n` +
+            `- left eye valid: ${leftEyeValid ? 'yes' : 'no'}\n` +
+            `- right eye valid: ${rightEyeValid ? 'yes' : 'no'}\n` +
+            `- both eyes valid: ${bothEyesValid ? 'yes' : 'no'}`
+          );
         }
       }
     }

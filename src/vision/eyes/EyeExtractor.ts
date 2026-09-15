@@ -1,8 +1,8 @@
 import type {
   NormalizedLandmark,
+  ExtractedOcularData,
   EyeLandmarkSet,
   IrisLandmarkSet,
-  ExtractedOcularData,
 } from '../../types/vision';
 import { MEDIAPIPE_INDICES } from './indices';
 
@@ -11,7 +11,7 @@ export class EyeExtractor {
    * Extract both eye contours and iris landmarks from the full 478-point landmark array.
    */
   public static extractOcularData(landmarks: NormalizedLandmark[] | null): ExtractedOcularData {
-    if (!landmarks || landmarks.length < 478) {
+    if (!landmarks || landmarks.length < 468) {
       return {
         leftEye: null,
         rightEye: null,
@@ -22,8 +22,8 @@ export class EyeExtractor {
 
     const leftEye = this.extractEyeContour(landmarks, MEDIAPIPE_INDICES.LEFT_EYE);
     const rightEye = this.extractEyeContour(landmarks, MEDIAPIPE_INDICES.RIGHT_EYE);
-    const leftIris = this.extractIris(landmarks, MEDIAPIPE_INDICES.LEFT_IRIS);
-    const rightIris = this.extractIris(landmarks, MEDIAPIPE_INDICES.RIGHT_IRIS);
+    const leftIris = landmarks.length >= 478 ? this.extractIris(landmarks, MEDIAPIPE_INDICES.LEFT_IRIS) : null;
+    const rightIris = landmarks.length >= 478 ? this.extractIris(landmarks, MEDIAPIPE_INDICES.RIGHT_IRIS) : null;
 
     // Calculate normalized interpupillary distance if both iris centers exist
     let interpupillaryDistanceNorm: number | undefined;

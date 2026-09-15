@@ -1,5 +1,5 @@
-import { BilateralPupilData, PupilGeometry } from '../../types/vision';
-import { NeuralShadowResult, NeuralPupilGeometry } from './LiveNeuralPupilPipeline';
+import type { BilateralPupilData, PupilGeometry } from '../../types/vision';
+import type { NeuralShadowResult, NeuralPupilGeometry } from './LiveNeuralPupilPipeline';
 
 export interface EyeComparison {
     deterministicValid: boolean;

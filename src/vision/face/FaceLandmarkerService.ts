@@ -14,6 +14,8 @@ export class FaceLandmarkerService {
   private errorMessage: string | null = null;
   private initPromise: Promise<FaceLandmarker> | null = null;
 
+  private lastTimestampMs: number = -1;
+
   private constructor() {}
 
   public static getInstance(): FaceLandmarkerService {
@@ -118,17 +120,22 @@ export class FaceLandmarkerService {
       return null;
     }
 
-    if (videoElement.readyState < 2) {
+    if (videoElement.readyState < 2 || videoElement.videoWidth === 0 || videoElement.videoHeight === 0) {
       return null;
     }
 
+    // Ensure timestamp is strictly monotonically increasing for MediaPipe VIDEO mode
+    const safeTimestamp = timestampMs > this.lastTimestampMs ? timestampMs : this.lastTimestampMs + 1;
+    this.lastTimestampMs = safeTimestamp;
+
     try {
-      const results = this.landmarker.detectForVideo(videoElement, timestampMs);
+      const results = this.landmarker.detectForVideo(videoElement, safeTimestamp);
       if (results.faceLandmarks && results.faceLandmarks.length > 0) {
         return results.faceLandmarks[0] as NormalizedLandmark[];
       }
       return null;
-    } catch {
+    } catch (err) {
+      console.error('[FaceLandmarkerService] detectForVideo exception:', err);
       return null;
     }
   }
@@ -144,5 +151,6 @@ export class FaceLandmarkerService {
     }
     this.status = 'uninitialized';
     this.initPromise = null;
+    this.lastTimestampMs = -1;
   }
 }
