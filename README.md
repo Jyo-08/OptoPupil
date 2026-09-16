@@ -366,11 +366,5 @@ Potential areas for contribution include:
 
 For substantial changes, open an issue first to discuss the proposed implementation.
 
----
 
-## License
-
-This project currently does not specify an open-source license.
-
-If the project is intended for publi
 
