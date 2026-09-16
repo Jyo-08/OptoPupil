@@ -35,6 +35,9 @@ dist-ssr
 ml/data/
 ml/models/*.pth
 ml/models/*.pt
+ml/checkpoints/
+*.pth
+*.pt
 .venv-ml/
 .venv/
 venv/

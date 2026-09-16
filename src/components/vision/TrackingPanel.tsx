@@ -2,8 +2,9 @@ import React from 'react';
 import type { TrackingQuality, BilateralPupilData } from '../../types/vision';
 import type { CameraState } from '../../camera/types';
 import type { FaceLandmarkerStatus } from '../../vision/face/types';
+import type { ONNXModelStatus, ExecutionProvider, NeuralComparisonTelemetry } from '../../vision/ml/types';
 import { StatusBadge } from '../common/StatusBadge';
-import { CheckCircle2, AlertTriangle, XCircle, RefreshCw, Cpu, Compass, Activity } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, XCircle, RefreshCw, Cpu, Compass, Activity, Brain } from 'lucide-react';
 
 interface TrackingPanelProps {
   tracking: TrackingQuality;
@@ -11,6 +12,9 @@ interface TrackingPanelProps {
   cameraState: CameraState;
   modelStatus: FaceLandmarkerStatus;
   modelError: string | null;
+  neuralModelStatus?: ONNXModelStatus;
+  neuralProvider?: ExecutionProvider;
+  neuralTelemetry?: NeuralComparisonTelemetry;
   onRetryCamera?: () => void;
   onSwitchCamera?: (deviceId: string) => void;
 }
@@ -20,6 +24,9 @@ export const TrackingPanel: React.FC<TrackingPanelProps> = ({
   cameraState,
   modelStatus,
   modelError,
+  neuralModelStatus = 'uninitialized',
+  neuralProvider = 'wasm',
+  neuralTelemetry,
   onRetryCamera,
   onSwitchCamera,
 }) => {
@@ -143,6 +150,50 @@ export const TrackingPanel: React.FC<TrackingPanelProps> = ({
             <span className="text-slate-400">CAMERA STATUS:</span>
             <span className="text-cyan-300 uppercase">{cameraState.status}</span>
           </div>
+        </div>
+
+        {/* Neural Shadow Intelligence Layer Diagnostics */}
+        <div className="mt-3 border-t border-slate-800 pt-3">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-1.5 font-mono text-[11px] font-semibold text-purple-300">
+              <Brain className="h-3.5 w-3.5 text-purple-400" />
+              <span>NEURAL SHADOW ML</span>
+            </div>
+            <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${
+              neuralModelStatus === 'ready'
+                ? 'bg-purple-950/70 border border-purple-800/60 text-purple-300'
+                : neuralModelStatus === 'loading'
+                ? 'bg-amber-950/60 border border-amber-800/40 text-amber-300'
+                : 'bg-slate-800 text-slate-400'
+            }`}>
+              {neuralModelStatus === 'ready' ? `READY (${neuralProvider.toUpperCase()})` : neuralModelStatus.toUpperCase()}
+            </span>
+          </div>
+
+          {neuralModelStatus === 'ready' && (
+            <div className="grid grid-cols-2 gap-2 text-[11px] font-mono text-slate-300 mt-2">
+              <div className="flex items-center justify-between rounded border border-slate-800/60 bg-slate-900/30 p-1.5">
+                <span className="text-slate-400">INFERENCE:</span>
+                <span className="text-purple-300 font-bold">
+                  {neuralTelemetry?.averageInferenceMs ? `${neuralTelemetry.averageInferenceMs} ms` : '—'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between rounded border border-slate-800/60 bg-slate-900/30 p-1.5">
+                <span className="text-slate-400">ML RATE:</span>
+                <span className="text-purple-300 font-bold">
+                  {neuralTelemetry?.mlFps ? `${neuralTelemetry.mlFps} FPS` : '—'}
+                </span>
+              </div>
+              {neuralTelemetry && neuralTelemetry.leftDiameterDeltaPx !== null && (
+                <div className="col-span-2 flex items-center justify-between rounded border border-slate-800/60 bg-slate-900/30 p-1.5 text-[10px]">
+                  <span className="text-slate-400">CV vs ML DELTA (L / R):</span>
+                  <span className="text-slate-200">
+                    ΔL: {neuralTelemetry.leftDiameterDeltaPx > 0 ? '+' : ''}{neuralTelemetry.leftDiameterDeltaPx}px | ΔR: {neuralTelemetry.rightDiameterDeltaPx !== null ? `${neuralTelemetry.rightDiameterDeltaPx > 0 ? '+' : ''}${neuralTelemetry.rightDiameterDeltaPx}px` : '—'}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Camera Selector if multiple devices found */}

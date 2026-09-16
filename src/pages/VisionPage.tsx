@@ -51,6 +51,9 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
   const {
     modelStatus,
     modelError,
+    neuralModelStatus,
+    neuralProvider,
+    neuralTelemetry,
     tracking,
     pupilData,
   } = useVisionPipeline({
@@ -249,6 +252,9 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
             cameraState={cameraState}
             modelStatus={modelStatus}
             modelError={modelError}
+            neuralModelStatus={neuralModelStatus}
+            neuralProvider={neuralProvider}
+            neuralTelemetry={neuralTelemetry}
             onRetryCamera={() => startCamera(cameraState.deviceId || undefined)}
             onSwitchCamera={(deviceId) => startCamera(deviceId)}
           />

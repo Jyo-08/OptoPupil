@@ -5,6 +5,14 @@ import { EyeExtractor } from '../vision/eyes/EyeExtractor';
 import { PupilDetector } from '../vision/pupil/PupilDetector';
 import { BilateralPupilStabilizer } from '../vision/pupil/PupilStabilizer';
 import { TrackingEvaluator } from '../vision/tracking/TrackingEvaluator';
+import { ONNXRuntimeService } from '../vision/ml/ONNXRuntimeService';
+import { NeuralPupilSegmenter } from '../vision/ml/NeuralPupilSegmenter';
+import type {
+  ONNXModelStatus,
+  ExecutionProvider,
+  BilateralNeuralPupilResult,
+  NeuralComparisonTelemetry,
+} from '../vision/ml/types';
 import type {
   NormalizedLandmark,
   ExtractedOcularData,
@@ -29,6 +37,20 @@ export function useVisionPipeline({
 }: UseVisionPipelineProps) {
   const [modelStatus, setModelStatus] = useState<FaceLandmarkerStatus>('uninitialized');
   const [modelError, setModelError] = useState<string | null>(null);
+
+  // Neural Shadow ML Pipeline State
+  const [neuralModelStatus, setNeuralModelStatus] = useState<ONNXModelStatus>('uninitialized');
+  const [neuralProvider, setNeuralProvider] = useState<ExecutionProvider>('wasm');
+  const [neuralTelemetry, setNeuralTelemetry] = useState<NeuralComparisonTelemetry>({
+    leftDiameterDeltaPx: null,
+    rightDiameterDeltaPx: null,
+    leftCentroidDistancePx: null,
+    rightCentroidDistancePx: null,
+    mlFps: 0,
+    averageInferenceMs: 0,
+    executionProvider: 'wasm',
+    modelStatus: 'uninitialized',
+  });
 
   // Throttled tracking & pupil state for UI display
   const [trackingUiState, setTrackingUiState] = useState<TrackingQuality>({
@@ -56,6 +78,15 @@ export function useVisionPipeline({
   const fpsTimerRef = useRef<number>(performance.now());
   const currentFpsRef = useRef<number>(0);
   const stabilizerRef = useRef<BilateralPupilStabilizer>(new BilateralPupilStabilizer());
+
+  // ML Shadow Pipeline Refs
+  const isMlInferringRef = useRef<boolean>(false);
+  const lastMlTimeRef = useRef<number>(0);
+  const mlFrameCountRef = useRef<number>(0);
+  const mlFpsTimerRef = useRef<number>(performance.now());
+  const currentMlFpsRef = useRef<number>(0);
+  const mlLatenciesRef = useRef<number[]>([]);
+  const latestNeuralResultRef = useRef<BilateralNeuralPupilResult | null>(null);
 
   // Initialize FaceLandmarker
   useEffect(() => {
@@ -86,6 +117,37 @@ export function useVisionPipeline({
     };
   }, []);
 
+  // Initialize ONNX Runtime Web Model for Neural Shadow Pipeline
+  useEffect(() => {
+    let isMounted = true;
+    const ortService = ONNXRuntimeService.getInstance();
+
+    setNeuralModelStatus('loading');
+    ortService
+      .initialize('/models/pupil_segmentation.onnx')
+      .then((success) => {
+        if (isMounted) {
+          const status = ortService.getStatus();
+          const provider = ortService.getExecutionProvider();
+          setNeuralModelStatus(status);
+          setNeuralProvider(provider);
+          if (!success) {
+            console.warn('[useVisionPipeline] ONNX Runtime initialization status:', status);
+          }
+        }
+      })
+      .catch((err) => {
+        if (isMounted) {
+          setNeuralModelStatus('error');
+          console.warn('[useVisionPipeline] Non-fatal ONNX initialization error:', err);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Frame processing and canvas rendering loop
   const processLoop = useCallback(() => {
     if (!isActive) return;
@@ -101,7 +163,7 @@ export function useVisionPipeline({
     ) {
       const now = performance.now();
 
-      // Calculate FPS
+      // Calculate camera FPS
       frameCountRef.current++;
       if (now - fpsTimerRef.current >= 1000) {
         currentFpsRef.current = Math.round(
@@ -109,6 +171,15 @@ export function useVisionPipeline({
         );
         frameCountRef.current = 0;
         fpsTimerRef.current = now;
+      }
+
+      // Calculate ML FPS
+      if (now - mlFpsTimerRef.current >= 1000) {
+        currentMlFpsRef.current = Math.round(
+          (mlFrameCountRef.current * 1000) / (now - mlFpsTimerRef.current)
+        );
+        mlFrameCountRef.current = 0;
+        mlFpsTimerRef.current = now;
       }
 
       // Process only new frames
@@ -121,11 +192,11 @@ export function useVisionPipeline({
         // 2. Eye & Iris Extraction
         const ocularData: ExtractedOcularData = EyeExtractor.extractOcularData(landmarks);
 
-        // 3. Bilateral Pupil Image Processing Detection
+        // 3. Bilateral Deterministic Pupil Image Processing Detection
         const rawLeftPupil = PupilDetector.detectPupil(video, ocularData.leftIris, ocularData.leftEye);
         const rawRightPupil = PupilDetector.detectPupil(video, ocularData.rightIris, ocularData.rightEye);
 
-        // 4. Temporal Stabilization
+        // 4. Temporal Stabilization (Deterministic live pipeline)
         const pupilData: BilateralPupilData = stabilizerRef.current.process(rawLeftPupil, rawRightPupil);
 
         // 5. Tracking Quality Evaluation
@@ -135,9 +206,108 @@ export function useVisionPipeline({
           currentFpsRef.current
         );
 
-        // 6. Direct Canvas Rendering (Zero React State Overhead)
+        // 6. Asynchronous Non-Blocking Neural Shadow Pipeline Execution (Throttled ~10 FPS)
+        const ortService = ONNXRuntimeService.getInstance();
+        if (
+          ortService.isReady() &&
+          !isMlInferringRef.current &&
+          now - lastMlTimeRef.current >= 95 && // ~10 Hz ML throttle
+          ocularData.leftEye &&
+          ocularData.rightEye &&
+          ocularData.leftIris &&
+          ocularData.rightIris
+        ) {
+          isMlInferringRef.current = true;
+          lastMlTimeRef.current = now;
+
+          const mlStart = performance.now();
+          const captureVideo = video;
+          const leftIris = ocularData.leftIris;
+          const leftEye = ocularData.leftEye;
+          const rightIris = ocularData.rightIris;
+          const rightEye = ocularData.rightEye;
+
+          // Bilateral inference on the exact same video frame snapshot
+          Promise.all([
+            NeuralPupilSegmenter.segmentOcularRegion(captureVideo, leftIris, leftEye),
+            NeuralPupilSegmenter.segmentOcularRegion(captureVideo, rightIris, rightEye),
+          ])
+            .then(([leftResult, rightResult]) => {
+              const mlEnd = performance.now();
+              const latencyMs = Number((mlEnd - mlStart).toFixed(1));
+
+              mlFrameCountRef.current++;
+              mlLatenciesRef.current.push(latencyMs);
+              if (mlLatenciesRef.current.length > 30) {
+                mlLatenciesRef.current.shift();
+              }
+
+              const sumLat = mlLatenciesRef.current.reduce((a, b) => a + b, 0);
+              const avgLat = Number((sumLat / mlLatenciesRef.current.length).toFixed(1));
+
+              const shadowResult: BilateralNeuralPupilResult = {
+                timestamp: mlEnd,
+                left: leftResult.geometry,
+                right: rightResult.geometry,
+                inferenceLatencyMs: latencyMs,
+                executionProvider: ortService.getExecutionProvider(),
+                isShadowMode: true,
+              };
+              latestNeuralResultRef.current = shadowResult;
+
+              // Compute engineering comparison deltas vs deterministic baseline
+              let leftDeltaPx: number | null = null;
+              let rightDeltaPx: number | null = null;
+              let leftCentroidDist: number | null = null;
+              let rightCentroidDist: number | null = null;
+
+              if (leftResult.geometry.diameterPx && rawLeftPupil.diameterPx) {
+                leftDeltaPx = Number((leftResult.geometry.diameterPx - rawLeftPupil.diameterPx).toFixed(2));
+              }
+              if (rightResult.geometry.diameterPx && rawRightPupil.diameterPx) {
+                rightDeltaPx = Number((rightResult.geometry.diameterPx - rawRightPupil.diameterPx).toFixed(2));
+              }
+              if (leftResult.geometry.centroidVideo && rawLeftPupil.centerPx) {
+                const dx = leftResult.geometry.centroidVideo.x - rawLeftPupil.centerPx.x;
+                const dy = leftResult.geometry.centroidVideo.y - rawLeftPupil.centerPx.y;
+                leftCentroidDist = Number(Math.sqrt(dx * dx + dy * dy).toFixed(2));
+              }
+              if (rightResult.geometry.centroidVideo && rawRightPupil.centerPx) {
+                const dx = rightResult.geometry.centroidVideo.x - rawRightPupil.centerPx.x;
+                const dy = rightResult.geometry.centroidVideo.y - rawRightPupil.centerPx.y;
+                rightCentroidDist = Number(Math.sqrt(dx * dx + dy * dy).toFixed(2));
+              }
+
+              setNeuralTelemetry({
+                leftDiameterDeltaPx: leftDeltaPx,
+                rightDiameterDeltaPx: rightDeltaPx,
+                leftCentroidDistancePx: leftCentroidDist,
+                rightCentroidDistancePx: rightCentroidDist,
+                mlFps: currentMlFpsRef.current,
+                averageInferenceMs: avgLat,
+                executionProvider: ortService.getExecutionProvider(),
+                modelStatus: ortService.getStatus(),
+              });
+            })
+            .catch((err) => {
+              console.warn('[useVisionPipeline] Non-fatal neural shadow execution error:', err);
+            })
+            .finally(() => {
+              isMlInferringRef.current = false;
+            });
+        }
+
+        // 7. Direct Canvas Rendering (Zero React State Overhead)
         if (canvas) {
-          renderCanvasOverlay(canvas, video, landmarks, ocularData, pupilData, trackingQuality);
+          renderCanvasOverlay(
+            canvas,
+            video,
+            landmarks,
+            ocularData,
+            pupilData,
+            trackingQuality,
+            latestNeuralResultRef.current
+          );
         }
 
         // Notify parent callback if provided
@@ -147,9 +317,11 @@ export function useVisionPipeline({
           ocularData,
           pupilData,
           tracking: trackingQuality,
+          neuralShadowData: latestNeuralResultRef.current,
+          neuralTelemetry,
         });
 
-        // 7. Throttled UI State Update (5-10 Hz)
+        // 8. Throttled UI State Update (5-10 Hz)
         if (now - lastUiUpdateRef.current > 120) {
           lastUiUpdateRef.current = now;
           setTrackingUiState(trackingQuality);
@@ -159,7 +331,7 @@ export function useVisionPipeline({
     }
 
     animFrameIdRef.current = requestAnimationFrame(processLoop);
-  }, [isActive, videoRef, canvasRef, onFrame]);
+  }, [isActive, videoRef, canvasRef, onFrame, neuralTelemetry]);
 
   // Start / stop loop
   useEffect(() => {
@@ -184,10 +356,14 @@ export function useVisionPipeline({
   return {
     modelStatus,
     modelError,
+    neuralModelStatus,
+    neuralProvider,
+    neuralTelemetry,
     tracking: trackingUiState,
     pupilData: pupilUiState,
   };
 }
+
 
 /**
  * High-performance canvas drawing function for live landmarks, irises, and detected pupils.
@@ -198,7 +374,8 @@ function renderCanvasOverlay(
   landmarks: NormalizedLandmark[] | null,
   ocularData: ExtractedOcularData,
   pupilData: BilateralPupilData,
-  tracking: TrackingQuality
+  tracking: TrackingQuality,
+  neuralData?: BilateralNeuralPupilResult | null
 ) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -257,7 +434,7 @@ function renderCanvasOverlay(
     drawIrisOverlay(ctx, ocularData.rightIris, width, height, 'rgba(6, 182, 212, 0.75)', 'R');
   }
 
-  // Draw Left Pupil (Stabilized Boundary & Center)
+  // Draw Left Pupil (Primary Deterministic Stabilized Boundary & Center)
   if (pupilData.leftPupil.detected && pupilData.leftPupil.centerNorm && pupilData.leftPupil.radiusPx) {
     drawPupilOverlay(
       ctx,
@@ -269,7 +446,7 @@ function renderCanvasOverlay(
     );
   }
 
-  // Draw Right Pupil (Stabilized Boundary & Center)
+  // Draw Right Pupil (Primary Deterministic Stabilized Boundary & Center)
   if (pupilData.rightPupil.detected && pupilData.rightPupil.centerNorm && pupilData.rightPupil.radiusPx) {
     drawPupilOverlay(
       ctx,
@@ -278,6 +455,30 @@ function renderCanvasOverlay(
       height,
       '#a855f7',
       'PUPIL (R)'
+    );
+  }
+
+  // Draw Neural Shadow Left Pupil (Secondary Intelligent Alignment Indicator)
+  if (neuralData?.left.detected && neuralData.left.centroidNorm && neuralData.left.radiusPx) {
+    drawNeuralPupilOverlay(
+      ctx,
+      neuralData.left,
+      width,
+      height,
+      '#10b981',
+      'ML (L)'
+    );
+  }
+
+  // Draw Neural Shadow Right Pupil (Secondary Intelligent Alignment Indicator)
+  if (neuralData?.right.detected && neuralData.right.centroidNorm && neuralData.right.radiusPx) {
+    drawNeuralPupilOverlay(
+      ctx,
+      neuralData.right,
+      width,
+      height,
+      '#10b981',
+      'ML (R)'
     );
   }
 
@@ -399,6 +600,44 @@ function drawPupilOverlay(
     ctx.fillText(text, cx - 30, cy + radiusPx + 14);
   }
 }
+
+function drawNeuralPupilOverlay(
+  ctx: CanvasRenderingContext2D,
+  neuralPupil: import('../vision/ml/types').NeuralPupilGeometry,
+  w: number,
+  h: number,
+  color: string,
+  label: string
+) {
+  if (!neuralPupil.centroidNorm || !neuralPupil.radiusPx) return;
+
+  const cx = neuralPupil.centroidNorm.x * w;
+  const cy = neuralPupil.centroidNorm.y * h;
+  const radiusPx = neuralPupil.radiusPx;
+
+  // Draw Neural Center Cross Dot
+  ctx.beginPath();
+  ctx.arc(cx, cy, 2, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+
+  // Draw Neural Boundary Ring (Dashed Emerald)
+  ctx.beginPath();
+  ctx.arc(cx, cy, Math.max(radiusPx, 3), 0, Math.PI * 2);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.4;
+  ctx.setLineDash([3, 3]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Tag
+  if (neuralPupil.diameterPx) {
+    ctx.font = '9px "JetBrains Mono", monospace';
+    ctx.fillStyle = '#6ee7b7';
+    ctx.fillText(`${label}: ${neuralPupil.diameterPx.toFixed(1)}px`, cx - 28, cy - radiusPx - 6);
+  }
+}
+
 
 function drawGuidanceReticle(
   ctx: CanvasRenderingContext2D,

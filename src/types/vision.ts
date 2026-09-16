@@ -111,4 +111,6 @@ export interface VisionFrameOutput {
   ocularData: ExtractedOcularData;
   pupilData: BilateralPupilData;
   tracking: TrackingQuality;
+  neuralShadowData?: import('../vision/ml/types').BilateralNeuralPupilResult | null;
+  neuralTelemetry?: import('../vision/ml/types').NeuralComparisonTelemetry | null;
 }
