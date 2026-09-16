@@ -2,6 +2,9 @@
 
 > **Zero-Hardware Quantitative Pupillary Light Reflex (PLR) Screening**  
 > *Developed for VMEDITHON 3.0*
+> Live deployed link - https://optopupil.vercel.app/
+> Kaggle notebook link - https://www.kaggle.com/code/jyotish1628/notebook64ebcbbf14/notebook
+> Kaggle real dataset link - https://www.kaggle.com/datasets/itguides/pupil-eye-and-iris-segmentation
 
 OptoPupil is a browser-based screening application that uses a standard device camera and display to capture and analyze pupillary light reflex dynamics without requiring specialized pupillometer hardware.
 
