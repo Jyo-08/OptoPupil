@@ -8,7 +8,7 @@ export function App() {
   const [currentView, setCurrentView] = useState<'landing' | 'vision'>('landing');
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#070a11] text-slate-100 selection:bg-cyan-500/20 selection:text-cyan-300">
+    <div className="flex min-h-screen flex-col bg-[#f8fafc] text-slate-900 selection:bg-sky-500/20 selection:text-sky-900">
       <Header
         currentView={currentView}
         onNavigateLanding={() => setCurrentView('landing')}

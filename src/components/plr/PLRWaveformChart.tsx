@@ -82,24 +82,24 @@ export const PLRWaveformChart: React.FC<PLRWaveformChartProps> = ({
   const hasData = chartData.length > 0;
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-[#0d1322] p-4 shadow-xl">
+    <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm">
       {/* Chart Header & Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-800/80 pb-3">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-200/80 pb-3">
         <div className="flex items-center gap-2">
-          <Activity className="h-4 w-4 text-cyan-400" />
-          <span className="font-mono text-xs font-bold tracking-wider text-slate-200 uppercase">
+          <Activity className="h-4 w-4 text-sky-600" />
+          <span className="font-mono text-xs font-bold tracking-wider text-slate-900 uppercase">
             Bilateral PLR Kinetics Waveform
           </span>
         </div>
 
         {/* View Mode Switcher */}
-        <div className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/80 p-1 font-mono text-xs">
+        <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-100 p-1 font-mono text-xs">
           <button
             onClick={() => setViewMode('diameter')}
             className={`rounded px-2.5 py-1 transition ${
               viewMode === 'diameter'
-                ? 'bg-cyan-500/20 text-cyan-300 font-semibold border border-cyan-500/40'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-white text-sky-700 font-semibold border border-slate-200/60 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             Diameter (mm)
@@ -108,8 +108,8 @@ export const PLRWaveformChart: React.FC<PLRWaveformChartProps> = ({
             onClick={() => setViewMode('velocity')}
             className={`rounded px-2.5 py-1 transition ${
               viewMode === 'velocity'
-                ? 'bg-purple-500/20 text-purple-300 font-semibold border border-purple-500/40'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-white text-indigo-700 font-semibold border border-slate-200/60 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             Velocity (mm/s)
@@ -122,26 +122,28 @@ export const PLRWaveformChart: React.FC<PLRWaveformChartProps> = ({
         {hasData ? (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData} margin={{ top: 10, right: 15, left: -10, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
               <XAxis
                 dataKey="timeMs"
-                stroke="#64748b"
+                stroke="#94a3b8"
                 tick={{ fontSize: 10, fill: '#64748b', fontFamily: 'monospace' }}
                 tickFormatter={(ms) => `${(ms / 1000).toFixed(1)}s`}
               />
               <YAxis
-                stroke="#64748b"
+                stroke="#94a3b8"
                 domain={viewMode === 'diameter' ? ['dataMin - 0.3', 'dataMax + 0.3'] : [-6, 3]}
                 tick={{ fontSize: 10, fill: '#64748b', fontFamily: 'monospace' }}
                 tickFormatter={(val) => `${val.toFixed(1)}`}
               />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: '#090d16',
-                  borderColor: '#334155',
+                  backgroundColor: '#ffffff',
+                  borderColor: '#e2e8f0',
                   borderRadius: '8px',
+                  boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
                   fontSize: '11px',
                   fontFamily: 'monospace',
+                  color: '#0f172a',
                 }}
                 labelFormatter={(ms) => `t = ${ms} ms (${(Number(ms) / 1000).toFixed(2)}s)`}
               />
@@ -258,12 +260,12 @@ export const PLRWaveformChart: React.FC<PLRWaveformChartProps> = ({
             </LineChart>
           </ResponsiveContainer>
         ) : (
-          <div className="flex h-full flex-col items-center justify-center rounded-lg border border-dashed border-slate-800 bg-slate-900/30 text-center">
-            <Zap className="h-8 w-8 text-slate-600 mb-2" />
-            <p className="font-mono text-xs text-slate-400">
+          <div className="flex h-full flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50/70 text-center">
+            <Zap className="h-8 w-8 text-slate-400 mb-2" />
+            <p className="font-mono text-xs text-slate-700 font-semibold">
               No PLR kinetic recording session captured yet.
             </p>
-            <p className="font-mono text-[11px] text-slate-600 mt-0.5">
+            <p className="font-mono text-[11px] text-slate-500 mt-0.5">
               Click &quot;Start PLR Screening&quot; below to record bilateral response kinetics.
             </p>
           </div>
@@ -272,19 +274,19 @@ export const PLRWaveformChart: React.FC<PLRWaveformChartProps> = ({
 
       {/* Chart Footer Diagnostics */}
       {hasData && (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800/80 pt-2.5 text-[10px] font-mono text-slate-400">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-2.5 text-[10px] font-mono text-slate-600">
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1">
-              <span className="h-2 w-2 rounded-full bg-cyan-400"></span>
-              <span className="text-cyan-300">LEFT EYE</span>
+              <span className="h-2 w-2 rounded-full bg-sky-500"></span>
+              <span className="text-sky-700 font-bold">LEFT EYE</span>
             </span>
             <span className="flex items-center gap-1">
-              <span className="h-2 w-2 rounded-full bg-purple-400"></span>
-              <span className="text-purple-300">RIGHT EYE</span>
+              <span className="h-2 w-2 rounded-full bg-purple-500"></span>
+              <span className="text-purple-700 font-bold">RIGHT EYE</span>
             </span>
           </div>
-          <div className="flex items-center gap-2 text-slate-400">
-            <TrendingDown className="h-3 w-3 text-amber-400" />
+          <div className="flex items-center gap-2 text-slate-500">
+            <TrendingDown className="h-3 w-3 text-amber-600" />
             <span>Sampling: ~{timeSeries.averageFps} FPS | Savitzky-Golay SG-5 Filtered</span>
           </div>
         </div>

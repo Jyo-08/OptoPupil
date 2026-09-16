@@ -3,46 +3,89 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
-  --bg-clinical: #070a11;
+  color-scheme: light;
+  --bg-clinical: #f8fafc;
 }
 
 body {
   margin: 0;
   padding: 0;
   background-color: var(--bg-clinical);
-  color: #f8fafc;
+  color: #0f172a;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Precision Reticle & Crosshair Styling */
+/* Precision Healthcare Clinical Grid */
 .clinical-grid-bg {
-  background-size: 32px 32px;
+  background-size: 36px 36px;
   background-image: 
-    linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    linear-gradient(to right, rgba(148, 163, 184, 0.12) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.12) 1px, transparent 1px);
 }
 
 .clinical-card {
-  background: #0d1322;
-  border: 1px solid #1e293b;
-  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 4px 20px -4px rgba(0, 0, 0, 0.05);
 }
 
-/* Custom Scrollbar for Clinical Density */
+/* 3D-Scroll Perspective & Depth Utility Classes */
+.perspective-800 {
+  perspective: 800px;
+}
+
+.perspective-1200 {
+  perspective: 1200px;
+}
+
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+
+.card-3d-tilt {
+  transform-style: preserve-3d;
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s ease;
+}
+
+.card-3d-tilt:hover {
+  transform: perspective(1000px) rotateX(2.5deg) rotateY(-3.5deg) translateY(-6px);
+  box-shadow: 0 20px 35px -8px rgba(2, 132, 199, 0.12), 0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
+.card-3d-tilt-alt:hover {
+  transform: perspective(1000px) rotateX(-2deg) rotateY(3deg) translateY(-6px);
+  box-shadow: 0 20px 35px -8px rgba(13, 148, 136, 0.12), 0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
+/* Gentle Soft Healthcare Glows */
+.medical-glow-blue {
+  box-shadow: 0 0 20px rgba(2, 132, 199, 0.18);
+}
+
+.medical-glow-teal {
+  box-shadow: 0 0 20px rgba(13, 148, 136, 0.18);
+}
+
+.medical-glow-emerald {
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.18);
+}
+
+/* Custom Scrollbar for Medical Density */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #070a11;
+  background: #f1f5f9;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
+  background: #cbd5e1;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: #94a3b8;
 }
+
+
