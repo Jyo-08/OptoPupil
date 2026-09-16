@@ -6,13 +6,14 @@
 
 import React from 'react';
 import type { BilateralPLRReport } from '../../plr/types';
-import { Timer, Gauge, ArrowRightLeft, ShieldAlert, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Timer, Gauge, ArrowRightLeft, ShieldAlert, CheckCircle, AlertTriangle, FileText } from 'lucide-react';
 
 interface PLRMetricsCardProps {
   report: BilateralPLRReport | null;
+  onExportReport?: () => void;
 }
 
-export const PLRMetricsCard: React.FC<PLRMetricsCardProps> = ({ report }) => {
+export const PLRMetricsCard: React.FC<PLRMetricsCardProps> = ({ report, onExportReport }) => {
   if (!report) {
     return (
       <div className="rounded-xl border border-slate-800 bg-[#0d1322] p-4 shadow-lg">
@@ -64,7 +65,7 @@ export const PLRMetricsCard: React.FC<PLRMetricsCardProps> = ({ report }) => {
     <div className="flex flex-col gap-4">
       {/* Primary Kinetic Telemetry Card */}
       <div className="rounded-xl border border-slate-800 bg-[#0d1322] p-4 shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+        <div className="flex flex-wrap items-center justify-between border-b border-slate-800/80 pb-3 gap-2">
           <div className="flex items-center gap-2">
             <Gauge className="h-4 w-4 text-cyan-400" />
             <span className="font-mono text-xs font-bold tracking-wider text-slate-200 uppercase">
@@ -72,6 +73,15 @@ export const PLRMetricsCard: React.FC<PLRMetricsCardProps> = ({ report }) => {
             </span>
           </div>
           <div className="flex items-center gap-2 font-mono text-[10px]">
+            {onExportReport && (
+              <button
+                onClick={onExportReport}
+                className="flex items-center gap-1 rounded-md border border-cyan-500/40 bg-cyan-950/40 px-2.5 py-1 font-bold text-cyan-300 hover:bg-cyan-900/60 transition shadow-sm"
+              >
+                <FileText className="h-3 w-3" />
+                <span>PDF REPORT</span>
+              </button>
+            )}
             <span
               className={`rounded px-2 py-0.5 font-bold ${
                 isReliable

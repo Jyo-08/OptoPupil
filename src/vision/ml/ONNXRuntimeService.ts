@@ -34,6 +34,10 @@ export class ONNXRuntimeService {
     return this.executionProvider;
   }
 
+  public getProviderUsed(): string {
+    return this.executionProvider;
+  }
+
   public getMetadata(): ModelMetadata | null {
     return this.metadata;
   }
@@ -42,10 +46,17 @@ export class ONNXRuntimeService {
     return this.status === 'ready' && this.session !== null;
   }
 
+  public getSession(): ort.InferenceSession {
+    if (!this.session) {
+      throw new Error('ONNXRuntimeService is not initialized. Call initialize() first.');
+    }
+    return this.session;
+  }
+
   /**
    * Lazily initialize ONNX Runtime session with WebGPU and WASM fallback.
    */
-  public async initialize(modelPath: string = DEFAULT_MODEL_PATH): Promise<boolean> {
+  public async initialize(modelSource?: string | Uint8Array | ArrayBufferLike): Promise<boolean> {
     if (this.session && this.status === 'ready') {
       return true;
     }
@@ -58,6 +69,18 @@ export class ONNXRuntimeService {
       this.status = 'loading';
       this.errorMessage = null;
 
+      const source = modelSource || DEFAULT_MODEL_PATH;
+
+      const createSession = async (opts: ort.InferenceSession.SessionOptions) => {
+        if (typeof source === 'string') {
+          return await ort.InferenceSession.create(source, opts);
+        } else if (source instanceof Uint8Array) {
+          return await ort.InferenceSession.create(source.buffer, opts);
+        } else {
+          return await ort.InferenceSession.create(source as ArrayBuffer, opts);
+        }
+      };
+
       // Attempt 1: WebGPU
       if (typeof navigator !== 'undefined' && 'gpu' in navigator) {
         try {
@@ -65,7 +88,7 @@ export class ONNXRuntimeService {
             executionProviders: ['webgpu'],
             graphOptimizationLevel: 'all',
           };
-          this.session = await ort.InferenceSession.create(modelPath, sessionOptions);
+          this.session = await createSession(sessionOptions);
           this.executionProvider = 'webgpu';
           this.status = 'ready';
           this.validateModelMetadata();
@@ -81,7 +104,7 @@ export class ONNXRuntimeService {
           executionProviders: ['wasm'],
           graphOptimizationLevel: 'all',
         };
-        this.session = await ort.InferenceSession.create(modelPath, wasmOptions);
+        this.session = await createSession(wasmOptions);
         this.executionProvider = 'wasm';
         this.status = 'ready';
         this.validateModelMetadata();
@@ -109,25 +132,33 @@ export class ONNXRuntimeService {
       const inputNames = this.session.inputNames;
       const outputNames = this.session.outputNames;
 
-      const inputName = inputNames[0] || 'image';
-      const outputName = outputNames[0] || 'segmentation_logits';
+      if (inputNames.length < 1 || inputNames[0] !== 'image') {
+        throw new Error(`Invalid model input name. Expected 'image', got: ${inputNames.join(', ')}`);
+      }
+
+      if (outputNames.length < 1 || outputNames[0] !== 'segmentation_logits') {
+        throw new Error(`Invalid model output name. Expected 'segmentation_logits', got: ${outputNames.join(', ')}`);
+      }
 
       this.metadata = {
-        inputName,
+        inputName: 'image',
         inputShape: [1, 1, 192, 256],
         inputDtype: 'float32',
-        outputName,
+        outputName: 'segmentation_logits',
         outputShape: [1, 4, 192, 256],
         outputDtype: 'float32',
         opset: 18,
       };
     } catch (err) {
-      console.warn('[ONNXRuntimeService] Could not inspect session metadata:', err);
+      console.warn('[ONNXRuntimeService] Metadata validation note:', err);
     }
   }
 
+  private inferenceQueue: Promise<unknown> = Promise.resolve();
+
   /**
    * Execute forward pass with [1, 1, 192, 256] Float32 tensor.
+   * Serializes calls through a promise queue to guarantee single-threaded session safety.
    * Never throws unhandled exceptions; returns null on inference failure.
    */
   public async runInference(inputTensor: ort.Tensor): Promise<ort.Tensor | null> {
@@ -135,22 +166,29 @@ export class ONNXRuntimeService {
       return null;
     }
 
-    try {
-      const inputName = this.session.inputNames[0] || 'image';
-      const feeds: Record<string, ort.Tensor> = { [inputName]: inputTensor };
-      const results = await this.session.run(feeds);
-      const outputName = this.session.outputNames[0] || 'segmentation_logits';
-      const outputTensor = results[outputName];
+    const execute = async (): Promise<ort.Tensor | null> => {
+      if (!this.session || this.status !== 'ready') return null;
+      try {
+        const inputName = this.session.inputNames[0] || 'image';
+        const feeds: Record<string, ort.Tensor> = { [inputName]: inputTensor };
+        const results = await this.session.run(feeds);
+        const outputName = this.session.outputNames[0] || 'segmentation_logits';
+        const outputTensor = results[outputName];
 
-      if (!outputTensor) {
+        if (!outputTensor) {
+          return null;
+        }
+
+        return outputTensor;
+      } catch (err) {
+        console.warn('[ONNXRuntimeService] Forward inference error:', err);
         return null;
       }
+    };
 
-      return outputTensor;
-    } catch (err) {
-      console.warn('[ONNXRuntimeService] Forward inference error:', err);
-      return null;
-    }
+    const nextInference = this.inferenceQueue.then(execute, execute);
+    this.inferenceQueue = nextInference.then(() => {}, () => {});
+    return nextInference;
   }
 
   public close(): void {

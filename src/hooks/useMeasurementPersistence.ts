@@ -7,7 +7,6 @@ import type { StimulusTiming } from '../stimulus/types';
 import {
   STABILITY_WINDOW_SIZE,
   STABILITY_TOLERANCE_PX,
-  STIMULUS_DURATION_MS,
 } from '../stimulus/config';
 
 export type ScreeningWorkflowState =
@@ -29,7 +28,7 @@ export function generateSessionId(): string {
 interface UseMeasurementPersistenceProps {
   pupilData: BilateralPupilData;
   isActive: boolean;
-  startStimulus: (durationMs?: number, onComplete?: (timing: StimulusTiming) => void) => void;
+  startStimulus?: (durationMs?: number, onComplete?: (timing: StimulusTiming) => void) => void;
 }
 
 export interface UseMeasurementPersistenceReturn {
@@ -77,14 +76,13 @@ interface PupilSample {
 export function useMeasurementPersistence({
   pupilData,
   isActive,
-  startStimulus,
 }: UseMeasurementPersistenceProps): UseMeasurementPersistenceReturn {
   const [currentSessionId, setCurrentSessionId] = useState<string>(() => generateSessionId());
   const [latestFinalRecord, setLatestFinalRecord] = useState<FinalScreeningRecord | null>(null);
   const [allFinalRecords, setAllFinalRecords] = useState<FinalScreeningRecord[]>([]);
   const [finalCount, setFinalCount] = useState<number>(0);
   const [rawCount, setRawCount] = useState<number>(0);
-  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [isSaving] = useState<boolean>(false);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
 
   const [screeningState, setScreeningState] = useState<ScreeningWorkflowState>('IDLE');
@@ -101,9 +99,7 @@ export function useMeasurementPersistence({
   const rollingWindowRef = useRef<PupilSample[]>([]);
   // Timestamp of last raw sample write to Database 1
   const lastRawSampleTimeRef = useRef<number>(0);
-  // Session lock ensuring exactly ONE stimulus trigger and ONE final DB record per session
-  const hasTriggeredForSessionRef = useRef<boolean>(false);
-  const isWritingFinalRef = useRef<boolean>(false);
+  const consecutiveDropsRef = useRef<number>(0);
 
   // Start a fresh screening session with a new unique session_id
   const startNewSession = useCallback(() => {
@@ -111,8 +107,7 @@ export function useMeasurementPersistence({
     setCurrentSessionId(nextSession);
     currentSessionIdRef.current = nextSession;
 
-    hasTriggeredForSessionRef.current = false;
-    isWritingFinalRef.current = false;
+    consecutiveDropsRef.current = 0;
     rollingWindowRef.current = [];
     setScreeningState('IDLE');
     setWindowSamplesCount(0);
@@ -169,8 +164,6 @@ export function useMeasurementPersistence({
       setLatestFinalRecord(null);
       setAllFinalRecords([]);
       setFinalCount(0);
-      hasTriggeredForSessionRef.current = false;
-      isWritingFinalRef.current = false;
       rollingWindowRef.current = [];
       setScreeningState('IDLE');
       setWindowSamplesCount(0);
@@ -210,8 +203,6 @@ export function useMeasurementPersistence({
   useEffect(() => {
     // If camera feed is stopped or inactive, reset in-memory baseline state
     if (!isActive) {
-      hasTriggeredForSessionRef.current = false;
-      isWritingFinalRef.current = false;
       rollingWindowRef.current = [];
       setScreeningState('IDLE');
       setWindowSamplesCount(0);
@@ -224,15 +215,15 @@ export function useMeasurementPersistence({
     const left = pupilData.leftPupil;
     const right = pupilData.rightPupil;
 
-    // Strict validation: both left & right must be DETECTED with finite positive numbers
+    // Robust validation: pupil is valid if detected/uncertain with finite positive diameter
     const isLeftValid =
-      left.status === 'DETECTED' &&
+      (left.status === 'DETECTED' || left.status === 'UNCERTAIN') &&
       typeof left.diameterPx === 'number' &&
       Number.isFinite(left.diameterPx) &&
       left.diameterPx > 0;
 
     const isRightValid =
-      right.status === 'DETECTED' &&
+      (right.status === 'DETECTED' || right.status === 'UNCERTAIN') &&
       typeof right.diameterPx === 'number' &&
       Number.isFinite(right.diameterPx) &&
       right.diameterPx > 0;
@@ -240,6 +231,7 @@ export function useMeasurementPersistence({
     const isCurrentlyBilateralDetected = isLeftValid && isRightValid;
 
     if (isCurrentlyBilateralDetected) {
+      consecutiveDropsRef.current = 0;
       const currentLeftPx = left.diameterPx!;
       const currentRightPx = right.diameterPx!;
       const now = performance.now();
@@ -262,11 +254,6 @@ export function useMeasurementPersistence({
         rawMeasurementRepository.saveRawSample(rawSample).catch((err) => {
           console.warn('OptoPupil DB: Raw sample persistence error:', err);
         });
-      }
-
-      // If screening has already triggered/finalized for this session, do not trigger again
-      if (hasTriggeredForSessionRef.current) {
-        return;
       }
 
       // 2. In-Memory Rolling Window for Baseline Stability Analysis
@@ -294,65 +281,15 @@ export function useMeasurementPersistence({
         const stable = isLeftStable && isRightStable;
 
         setIsBaselineStable(stable);
-
-        if (stable && !isWritingFinalRef.current) {
-          // --- STABLE BASELINE DETECTED: TRIGGER STIMULUS & CREATE FINAL RECORD IN DATABASE 2 ---
-          hasTriggeredForSessionRef.current = true;
-          setScreeningState('STIMULUS_ACTIVE');
-
-          const onsetTime = performance.now();
-          const captureTimestamp = new Date().toISOString();
-          const captureLeftPx = Number(currentLeftPx.toFixed(2));
-          const captureRightPx = Number(currentRightPx.toFixed(2));
-
-          const baselineLeftMean = Number((leftVals.reduce((a, b) => a + b, 0) / leftVals.length).toFixed(2));
-          const baselineRightMean = Number((rightVals.reduce((a, b) => a + b, 0) / rightVals.length).toFixed(2));
-
-          // 1. Immediately trigger the existing controlled display light stimulus
-          startStimulus(STIMULUS_DURATION_MS, () => {
-            setScreeningState('FINALIZED');
-          });
-
-          // 2. Persist finalized record into DATABASE 2 (Final Screening Store)
-          isWritingFinalRef.current = true;
-          setIsSaving(true);
-
-          const finalRecord: Omit<FinalScreeningRecord, 'id'> = {
-            session_id: currentSessionIdRef.current,
-            timestamp: captureTimestamp,
-            baseline_left_pupil_px: baselineLeftMean,
-            baseline_right_pupil_px: baselineRightMean,
-            stimulus_onset_timestamp: captureTimestamp,
-            stimulus_onset_ms: onsetTime,
-            stimulus_left_pupil_px: captureLeftPx,
-            stimulus_right_pupil_px: captureRightPx,
-            stimulus_duration_ms: STIMULUS_DURATION_MS,
-            status: 'FINALIZED',
-          };
-
-          finalMeasurementRepository
-            .createFinalRecord(finalRecord)
-            .then(() => {
-              setPersistenceError(null);
-            })
-            .catch((err) => {
-              console.error('OptoPupil DB: Failed to persist finalized screening record:', err);
-              setPersistenceError(err?.message || 'Failed to save final record');
-            })
-            .finally(() => {
-              isWritingFinalRef.current = false;
-              setIsSaving(false);
-            });
-        } else {
-          setScreeningState('COLLECTING_RAW_BASELINE');
-        }
+        setScreeningState(stable ? 'BASELINE_STABLE' : 'COLLECTING_RAW_BASELINE');
       } else {
         setScreeningState('COLLECTING_RAW_BASELINE');
         setIsBaselineStable(false);
       }
     } else {
-      // Detection is lost or degraded
-      if (!hasTriggeredForSessionRef.current) {
+      // Detection is temporarily lost or degraded (tolerate 4 frames of micro-blinks)
+      consecutiveDropsRef.current++;
+      if (consecutiveDropsRef.current > 4) {
         rollingWindowRef.current = [];
         setWindowSamplesCount(0);
         setLeftDeltaPx(0);
@@ -361,7 +298,7 @@ export function useMeasurementPersistence({
         setScreeningState('IDLE');
       }
     }
-  }, [pupilData, isActive, startStimulus]);
+  }, [pupilData, isActive]);
 
   return {
     currentSessionId,

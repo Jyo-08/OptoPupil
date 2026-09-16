@@ -62,17 +62,24 @@ export class TimeSeriesRecorder {
     const leftIrisRadiusPx = leftIris ? leftIris.estimatedRadiusNorm * 1280 : null;
     const rightIrisRadiusPx = rightIris ? rightIris.estimatedRadiusNorm * 1280 : null;
 
-    // Millimeter physical scale calibration
-    let leftDiameterMm: number | null = null;
-    let rightDiameterMm: number | null = null;
+    // Millimeter physical scale calibration (prefer already calibrated diameterMm from PupilDetector)
+    let leftDiameterMm: number | null = leftPupil.diameterMm ?? null;
+    let rightDiameterMm: number | null = rightPupil.diameterMm ?? null;
 
-    if (leftPupil.detected && leftPupil.diameterPx && leftIrisRadiusPx && leftIrisRadiusPx > 5) {
-      // Scale: mm = (diameterPx / (2 * irisRadiusPx)) * 11.7mm
-      leftDiameterMm = (leftPupil.diameterPx / (2 * leftIrisRadiusPx)) * STANDARD_HUMAN_IRIS_DIAMETER_MM;
+    if (leftDiameterMm === null && leftPupil.detected && leftPupil.diameterPx) {
+      if (leftIrisRadiusPx && leftIrisRadiusPx > 5) {
+        leftDiameterMm = (leftPupil.diameterPx / (2 * leftIrisRadiusPx)) * STANDARD_HUMAN_IRIS_DIAMETER_MM;
+      } else {
+        leftDiameterMm = leftPupil.diameterPx * 0.1;
+      }
     }
 
-    if (rightPupil.detected && rightPupil.diameterPx && rightIrisRadiusPx && rightIrisRadiusPx > 5) {
-      rightDiameterMm = (rightPupil.diameterPx / (2 * rightIrisRadiusPx)) * STANDARD_HUMAN_IRIS_DIAMETER_MM;
+    if (rightDiameterMm === null && rightPupil.detected && rightPupil.diameterPx) {
+      if (rightIrisRadiusPx && rightIrisRadiusPx > 5) {
+        rightDiameterMm = (rightPupil.diameterPx / (2 * rightIrisRadiusPx)) * STANDARD_HUMAN_IRIS_DIAMETER_MM;
+      } else {
+        rightDiameterMm = rightPupil.diameterPx * 0.1;
+      }
     }
 
     // Blink or tracking dropout check

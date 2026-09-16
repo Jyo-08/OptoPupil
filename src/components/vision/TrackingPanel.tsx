@@ -81,28 +81,28 @@ export const TrackingPanel: React.FC<TrackingPanelProps> = ({
           <div className="flex items-center justify-between rounded-md border border-slate-800/80 bg-slate-900/40 p-2">
             <span className="text-slate-400">LEFT EYE:</span>
             <span className={tracking.leftEyeDetected ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
-              {tracking.leftEyeDetected ? 'OK' : 'LOST'}
+              {tracking.leftEyeDetected ? 'DETECTED' : 'LOST'}
             </span>
           </div>
 
           <div className="flex items-center justify-between rounded-md border border-slate-800/80 bg-slate-900/40 p-2">
             <span className="text-slate-400">RIGHT EYE:</span>
             <span className={tracking.rightEyeDetected ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
-              {tracking.rightEyeDetected ? 'OK' : 'LOST'}
+              {tracking.rightEyeDetected ? 'DETECTED' : 'LOST'}
             </span>
           </div>
 
           <div className="flex items-center justify-between rounded-md border border-slate-800/80 bg-slate-900/40 p-2">
             <span className="text-slate-400">LEFT IRIS:</span>
             <span className={tracking.leftIrisDetected ? 'text-cyan-300 font-bold' : 'text-slate-500'}>
-              {tracking.leftIrisDetected ? 'TRACKED' : 'LOST'}
+              {tracking.leftIrisDetected ? 'DETECTED' : 'LOST'}
             </span>
           </div>
 
           <div className="flex items-center justify-between rounded-md border border-slate-800/80 bg-slate-900/40 p-2">
             <span className="text-slate-400">RIGHT IRIS:</span>
             <span className={tracking.rightIrisDetected ? 'text-cyan-300 font-bold' : 'text-slate-500'}>
-              {tracking.rightIrisDetected ? 'TRACKED' : 'LOST'}
+              {tracking.rightIrisDetected ? 'DETECTED' : 'LOST'}
             </span>
           </div>
         </div>

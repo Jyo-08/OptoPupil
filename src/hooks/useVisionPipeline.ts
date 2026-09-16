@@ -71,9 +71,16 @@ export function useVisionPipeline({
     rawRightPupil: { detected: false, status: 'LOST', centerNorm: null, centerPx: null, radiusPx: null, diameterPx: null },
   });
 
-  const animFrameIdRef = useRef<number | null>(null);
+  // Stable references to callbacks and telemetry
+  const onFrameRef = useRef(onFrame);
+  onFrameRef.current = onFrame;
+
+  const neuralTelemetryRef = useRef(neuralTelemetry);
+  neuralTelemetryRef.current = neuralTelemetry;
+
   const lastVideoTimeRef = useRef<number>(-1);
   const lastUiUpdateRef = useRef<number>(0);
+  const lastDiagLogRef = useRef<number>(0);
   const frameCountRef = useRef<number>(0);
   const fpsTimerRef = useRef<number>(performance.now());
   const currentFpsRef = useRef<number>(0);
@@ -117,8 +124,18 @@ export function useVisionPipeline({
     };
   }, []);
 
+  // Check if neural shadow inference is explicitly disabled via env flag
+  const isNeuralShadowDisabled =
+    typeof import.meta !== 'undefined' &&
+    import.meta.env?.VITE_DISABLE_NEURAL_SHADOW === 'true';
+
   // Initialize ONNX Runtime Web Model for Neural Shadow Pipeline
   useEffect(() => {
+    if (isNeuralShadowDisabled) {
+      setNeuralModelStatus('uninitialized');
+      return;
+    }
+
     let isMounted = true;
     const ortService = ONNXRuntimeService.getInstance();
 
@@ -146,212 +163,256 @@ export function useVisionPipeline({
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [isNeuralShadowDisabled]);
 
-  // Frame processing and canvas rendering loop
-  const processLoop = useCallback(() => {
-    if (!isActive) return;
-
+  // Single Frame Processing Core
+  const processFrame = useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const service = FaceLandmarkerService.getInstance();
 
     if (
-      video &&
-      video.readyState >= 2 &&
-      service.isReady()
+      !video ||
+      video.readyState < 2 ||
+      !service.isReady()
     ) {
-      const now = performance.now();
-
-      // Calculate camera FPS
-      frameCountRef.current++;
-      if (now - fpsTimerRef.current >= 1000) {
-        currentFpsRef.current = Math.round(
-          (frameCountRef.current * 1000) / (now - fpsTimerRef.current)
-        );
-        frameCountRef.current = 0;
-        fpsTimerRef.current = now;
-      }
-
-      // Calculate ML FPS
-      if (now - mlFpsTimerRef.current >= 1000) {
-        currentMlFpsRef.current = Math.round(
-          (mlFrameCountRef.current * 1000) / (now - mlFpsTimerRef.current)
-        );
-        mlFrameCountRef.current = 0;
-        mlFpsTimerRef.current = now;
-      }
-
-      // Process only new frames
-      if (video.currentTime !== lastVideoTimeRef.current) {
-        lastVideoTimeRef.current = video.currentTime;
-
-        // 1. MediaPipe Face Landmarks
-        const landmarks: NormalizedLandmark[] | null = service.detectFrame(video, now);
-
-        // 2. Eye & Iris Extraction
-        const ocularData: ExtractedOcularData = EyeExtractor.extractOcularData(landmarks);
-
-        // 3. Bilateral Deterministic Pupil Image Processing Detection
-        const rawLeftPupil = PupilDetector.detectPupil(video, ocularData.leftIris, ocularData.leftEye);
-        const rawRightPupil = PupilDetector.detectPupil(video, ocularData.rightIris, ocularData.rightEye);
-
-        // 4. Temporal Stabilization (Deterministic live pipeline)
-        const pupilData: BilateralPupilData = stabilizerRef.current.process(rawLeftPupil, rawRightPupil);
-
-        // 5. Tracking Quality Evaluation
-        const trackingQuality: TrackingQuality = TrackingEvaluator.evaluate(
-          landmarks,
-          ocularData,
-          currentFpsRef.current
-        );
-
-        // 6. Asynchronous Non-Blocking Neural Shadow Pipeline Execution (Throttled ~10 FPS)
-        const ortService = ONNXRuntimeService.getInstance();
-        if (
-          ortService.isReady() &&
-          !isMlInferringRef.current &&
-          now - lastMlTimeRef.current >= 95 && // ~10 Hz ML throttle
-          ocularData.leftEye &&
-          ocularData.rightEye &&
-          ocularData.leftIris &&
-          ocularData.rightIris
-        ) {
-          isMlInferringRef.current = true;
-          lastMlTimeRef.current = now;
-
-          const mlStart = performance.now();
-          const captureVideo = video;
-          const leftIris = ocularData.leftIris;
-          const leftEye = ocularData.leftEye;
-          const rightIris = ocularData.rightIris;
-          const rightEye = ocularData.rightEye;
-
-          // Bilateral inference on the exact same video frame snapshot
-          Promise.all([
-            NeuralPupilSegmenter.segmentOcularRegion(captureVideo, leftIris, leftEye),
-            NeuralPupilSegmenter.segmentOcularRegion(captureVideo, rightIris, rightEye),
-          ])
-            .then(([leftResult, rightResult]) => {
-              const mlEnd = performance.now();
-              const latencyMs = Number((mlEnd - mlStart).toFixed(1));
-
-              mlFrameCountRef.current++;
-              mlLatenciesRef.current.push(latencyMs);
-              if (mlLatenciesRef.current.length > 30) {
-                mlLatenciesRef.current.shift();
-              }
-
-              const sumLat = mlLatenciesRef.current.reduce((a, b) => a + b, 0);
-              const avgLat = Number((sumLat / mlLatenciesRef.current.length).toFixed(1));
-
-              const shadowResult: BilateralNeuralPupilResult = {
-                timestamp: mlEnd,
-                left: leftResult.geometry,
-                right: rightResult.geometry,
-                inferenceLatencyMs: latencyMs,
-                executionProvider: ortService.getExecutionProvider(),
-                isShadowMode: true,
-              };
-              latestNeuralResultRef.current = shadowResult;
-
-              // Compute engineering comparison deltas vs deterministic baseline
-              let leftDeltaPx: number | null = null;
-              let rightDeltaPx: number | null = null;
-              let leftCentroidDist: number | null = null;
-              let rightCentroidDist: number | null = null;
-
-              if (leftResult.geometry.diameterPx && rawLeftPupil.diameterPx) {
-                leftDeltaPx = Number((leftResult.geometry.diameterPx - rawLeftPupil.diameterPx).toFixed(2));
-              }
-              if (rightResult.geometry.diameterPx && rawRightPupil.diameterPx) {
-                rightDeltaPx = Number((rightResult.geometry.diameterPx - rawRightPupil.diameterPx).toFixed(2));
-              }
-              if (leftResult.geometry.centroidVideo && rawLeftPupil.centerPx) {
-                const dx = leftResult.geometry.centroidVideo.x - rawLeftPupil.centerPx.x;
-                const dy = leftResult.geometry.centroidVideo.y - rawLeftPupil.centerPx.y;
-                leftCentroidDist = Number(Math.sqrt(dx * dx + dy * dy).toFixed(2));
-              }
-              if (rightResult.geometry.centroidVideo && rawRightPupil.centerPx) {
-                const dx = rightResult.geometry.centroidVideo.x - rawRightPupil.centerPx.x;
-                const dy = rightResult.geometry.centroidVideo.y - rawRightPupil.centerPx.y;
-                rightCentroidDist = Number(Math.sqrt(dx * dx + dy * dy).toFixed(2));
-              }
-
-              setNeuralTelemetry({
-                leftDiameterDeltaPx: leftDeltaPx,
-                rightDiameterDeltaPx: rightDeltaPx,
-                leftCentroidDistancePx: leftCentroidDist,
-                rightCentroidDistancePx: rightCentroidDist,
-                mlFps: currentMlFpsRef.current,
-                averageInferenceMs: avgLat,
-                executionProvider: ortService.getExecutionProvider(),
-                modelStatus: ortService.getStatus(),
-              });
-            })
-            .catch((err) => {
-              console.warn('[useVisionPipeline] Non-fatal neural shadow execution error:', err);
-            })
-            .finally(() => {
-              isMlInferringRef.current = false;
-            });
-        }
-
-        // 7. Direct Canvas Rendering (Zero React State Overhead)
-        if (canvas) {
-          renderCanvasOverlay(
-            canvas,
-            video,
-            landmarks,
-            ocularData,
-            pupilData,
-            trackingQuality,
-            latestNeuralResultRef.current
-          );
-        }
-
-        // Notify parent callback if provided
-        onFrame?.({
-          timestamp: now,
-          allLandmarks: landmarks,
-          ocularData,
-          pupilData,
-          tracking: trackingQuality,
-          neuralShadowData: latestNeuralResultRef.current,
-          neuralTelemetry,
-        });
-
-        // 8. Throttled UI State Update (5-10 Hz)
-        if (now - lastUiUpdateRef.current > 120) {
-          lastUiUpdateRef.current = now;
-          setTrackingUiState(trackingQuality);
-          setPupilUiState(pupilData);
-        }
-      }
+      return;
     }
 
-    animFrameIdRef.current = requestAnimationFrame(processLoop);
-  }, [isActive, videoRef, canvasRef, onFrame, neuralTelemetry]);
+    const now = performance.now();
 
-  // Start / stop loop
-  useEffect(() => {
-    if (isActive && modelStatus === 'ready') {
-      animFrameIdRef.current = requestAnimationFrame(processLoop);
-    } else {
-      if (animFrameIdRef.current) {
-        cancelAnimationFrame(animFrameIdRef.current);
-        animFrameIdRef.current = null;
+    // Calculate camera FPS
+    frameCountRef.current++;
+    if (now - fpsTimerRef.current >= 1000) {
+      currentFpsRef.current = Math.round(
+        (frameCountRef.current * 1000) / (now - fpsTimerRef.current)
+      );
+      frameCountRef.current = 0;
+      fpsTimerRef.current = now;
+    }
+
+    // Calculate ML FPS
+    if (now - mlFpsTimerRef.current >= 1000) {
+      currentMlFpsRef.current = Math.round(
+        (mlFrameCountRef.current * 1000) / (now - mlFpsTimerRef.current)
+      );
+      mlFrameCountRef.current = 0;
+      mlFpsTimerRef.current = now;
+    }
+
+    // Process only new video frames
+    if (video.currentTime !== lastVideoTimeRef.current) {
+      lastVideoTimeRef.current = video.currentTime;
+
+      // 1. MediaPipe Face Landmarks
+      const landmarks: NormalizedLandmark[] | null = service.detectFrame(video, now);
+
+      // 2. Eye & Iris Extraction
+      const ocularData: ExtractedOcularData = EyeExtractor.extractOcularData(landmarks);
+
+      // 3. Bilateral Deterministic Pupil Image Processing Detection
+      const rawLeftPupil = PupilDetector.detectPupil(video, ocularData.leftIris, ocularData.leftEye);
+      const rawRightPupil = PupilDetector.detectPupil(video, ocularData.rightIris, ocularData.rightEye);
+
+      // 4. Temporal Stabilization (Deterministic live pipeline)
+      const pupilData: BilateralPupilData = stabilizerRef.current.process(rawLeftPupil, rawRightPupil);
+
+      // 5. Tracking Quality Evaluation
+      const trackingQuality: TrackingQuality = TrackingEvaluator.evaluate(
+        landmarks,
+        ocularData,
+        currentFpsRef.current
+      );
+
+      // 6. Asynchronous Non-Blocking Neural Shadow Pipeline Execution (Throttled ~4 Hz / 250ms)
+      const ortService = ONNXRuntimeService.getInstance();
+      if (
+        !isNeuralShadowDisabled &&
+        ortService.isReady() &&
+        !isMlInferringRef.current &&
+        now - lastMlTimeRef.current >= 250 && // 4 Hz ML throttle to ensure ZERO main-thread starvation
+        ocularData.leftEye &&
+        ocularData.rightEye &&
+        ocularData.leftIris &&
+        ocularData.rightIris
+      ) {
+        isMlInferringRef.current = true;
+        lastMlTimeRef.current = now;
+
+        const mlStart = performance.now();
+        const captureVideo = video;
+        const leftIris = ocularData.leftIris;
+        const leftEye = ocularData.leftEye;
+        const rightIris = ocularData.rightIris;
+        const rightEye = ocularData.rightEye;
+
+        // Run sequentially to guarantee WebAssembly single-session safety
+        (async () => {
+          const leftResult = await NeuralPupilSegmenter.segmentOcularRegion(captureVideo, leftIris, leftEye);
+          const rightResult = await NeuralPupilSegmenter.segmentOcularRegion(captureVideo, rightIris, rightEye);
+          return [leftResult, rightResult] as const;
+        })()
+          .then(([leftResult, rightResult]) => {
+            const mlEnd = performance.now();
+            const latencyMs = Number((mlEnd - mlStart).toFixed(1));
+
+            mlFrameCountRef.current++;
+            mlLatenciesRef.current.push(latencyMs);
+            if (mlLatenciesRef.current.length > 20) {
+              mlLatenciesRef.current.shift();
+            }
+
+            const sumLat = mlLatenciesRef.current.reduce((a, b) => a + b, 0);
+            const avgLat = Number((sumLat / mlLatenciesRef.current.length).toFixed(1));
+
+            const shadowResult: BilateralNeuralPupilResult = {
+              timestamp: mlEnd,
+              left: leftResult.geometry,
+              right: rightResult.geometry,
+              inferenceLatencyMs: latencyMs,
+              executionProvider: ortService.getExecutionProvider(),
+              isShadowMode: true,
+            };
+            latestNeuralResultRef.current = shadowResult;
+
+            // Compute engineering comparison deltas vs deterministic baseline
+            let leftDeltaPx: number | null = null;
+            let rightDeltaPx: number | null = null;
+            let leftCentroidDist: number | null = null;
+            let rightCentroidDist: number | null = null;
+
+            if (leftResult.geometry.diameterPx && rawLeftPupil.diameterPx) {
+              leftDeltaPx = Number((leftResult.geometry.diameterPx - rawLeftPupil.diameterPx).toFixed(2));
+            }
+            if (rightResult.geometry.diameterPx && rawRightPupil.diameterPx) {
+              rightDeltaPx = Number((rightResult.geometry.diameterPx - rawRightPupil.diameterPx).toFixed(2));
+            }
+            if (leftResult.geometry.centroidVideo && rawLeftPupil.centerPx) {
+              const dx = leftResult.geometry.centroidVideo.x - rawLeftPupil.centerPx.x;
+              const dy = leftResult.geometry.centroidVideo.y - rawLeftPupil.centerPx.y;
+              leftCentroidDist = Number(Math.sqrt(dx * dx + dy * dy).toFixed(2));
+            }
+            if (rightResult.geometry.centroidVideo && rawRightPupil.centerPx) {
+              const dx = rightResult.geometry.centroidVideo.x - rawRightPupil.centerPx.x;
+              const dy = rightResult.geometry.centroidVideo.y - rawRightPupil.centerPx.y;
+              rightCentroidDist = Number(Math.sqrt(dx * dx + dy * dy).toFixed(2));
+            }
+
+            const updatedTelemetry: NeuralComparisonTelemetry = {
+              leftDiameterDeltaPx: leftDeltaPx,
+              rightDiameterDeltaPx: rightDeltaPx,
+              leftCentroidDistancePx: leftCentroidDist,
+              rightCentroidDistancePx: rightCentroidDist,
+              mlFps: currentMlFpsRef.current,
+              averageInferenceMs: avgLat,
+              executionProvider: ortService.getExecutionProvider(),
+              modelStatus: ortService.getStatus(),
+            };
+
+            neuralTelemetryRef.current = updatedTelemetry;
+          })
+          .catch((err) => {
+            console.warn('[useVisionPipeline] Non-fatal neural shadow execution error:', err);
+          })
+          .finally(() => {
+            isMlInferringRef.current = false;
+          });
       }
+
+      // 7. Direct Canvas Rendering (Zero React State Overhead)
+      if (canvas) {
+        renderCanvasOverlay(
+          canvas,
+          video,
+          landmarks,
+          ocularData,
+          pupilData,
+          trackingQuality,
+          latestNeuralResultRef.current
+        );
+      }
+
+      // Notify parent callback synchronously on every frame
+      onFrameRef.current?.({
+        timestamp: now,
+        allLandmarks: landmarks,
+        ocularData,
+        pupilData,
+        tracking: trackingQuality,
+        neuralShadowData: latestNeuralResultRef.current,
+        neuralTelemetry: neuralTelemetryRef.current,
+      });
+
+      // 8. Throttled UI State Update (~5 Hz / 200ms)
+      if (now - lastUiUpdateRef.current >= 200) {
+        lastUiUpdateRef.current = now;
+        setTrackingUiState(trackingQuality);
+        setPupilUiState(pupilData);
+        if (neuralTelemetryRef.current) {
+          setNeuralTelemetry(neuralTelemetryRef.current);
+        }
+      }
+
+      // 9. Throttled Diagnostic Logging (~1 Hz)
+      if (now - lastDiagLogRef.current >= 1000) {
+        lastDiagLogRef.current = now;
+        const leftEyeValid = ocularData.leftEye !== null && ocularData.leftIris !== null;
+        const rightEyeValid = ocularData.rightEye !== null && ocularData.rightIris !== null;
+        const bothEyesValid = leftEyeValid && rightEyeValid;
+
+        console.log(
+          `[OPTOPUPIL VISION DIAGNOSTICS]\n` +
+          `FACE:\n` +
+          `- face detected: ${trackingQuality.faceDetected ? 'yes' : 'no'}\n` +
+          `- landmark count: ${landmarks ? landmarks.length : 0}\n\n` +
+          `LEFT EYE:\n` +
+          `- landmark count: ${ocularData.leftEye ? ocularData.leftEye.contour.length : 0}\n` +
+          `- bounding box: ${ocularData.leftEye ? `[minX: ${ocularData.leftEye.boundingBox.minX.toFixed(3)}, minY: ${ocularData.leftEye.boundingBox.minY.toFixed(3)}, maxX: ${ocularData.leftEye.boundingBox.maxX.toFixed(3)}, maxY: ${ocularData.leftEye.boundingBox.maxY.toFixed(3)}]` : 'none'}\n` +
+          `- iris detected: ${ocularData.leftIris ? 'yes' : 'no'}\n\n` +
+          `RIGHT EYE:\n` +
+          `- landmark count: ${ocularData.rightEye ? ocularData.rightEye.contour.length : 0}\n` +
+          `- bounding box: ${ocularData.rightEye ? `[minX: ${ocularData.rightEye.boundingBox.minX.toFixed(3)}, minY: ${ocularData.rightEye.boundingBox.minY.toFixed(3)}, maxX: ${ocularData.rightEye.boundingBox.maxX.toFixed(3)}, maxY: ${ocularData.rightEye.boundingBox.maxY.toFixed(3)}]` : 'none'}\n` +
+          `- iris detected: ${ocularData.rightIris ? 'yes' : 'no'}\n\n` +
+          `TRACKING:\n` +
+          `- left eye valid: ${leftEyeValid ? 'yes' : 'no'}\n` +
+          `- right eye valid: ${rightEyeValid ? 'yes' : 'no'}\n` +
+          `- both eyes valid: ${bothEyesValid ? 'yes' : 'no'}`
+        );
+      }
+    }
+  }, [videoRef, canvasRef, isNeuralShadowDisabled]);
+
+  // Robust, Non-Tearing Animation Loop Lifecycle with Controlled 30 FPS Main-Thread Yielding
+  useEffect(() => {
+    let animId: number | null = null;
+    let isRunning = true;
+    let lastProcessTime = 0;
+
+    const loop = (timestamp: number) => {
+      if (!isRunning) return;
+
+      // Throttle heavy vision processing to ~30 FPS (33ms interval) to guarantee UI responsiveness
+      if (timestamp - lastProcessTime >= 33) {
+        lastProcessTime = timestamp;
+        processFrame();
+      }
+
+      animId = requestAnimationFrame(loop);
+    };
+
+    if (isActive && modelStatus === 'ready') {
+      animId = requestAnimationFrame(loop);
+    } else {
       stabilizerRef.current.reset();
     }
 
     return () => {
-      if (animFrameIdRef.current) {
-        cancelAnimationFrame(animFrameIdRef.current);
-        animFrameIdRef.current = null;
+      isRunning = false;
+      if (animId !== null) {
+        cancelAnimationFrame(animId);
       }
     };
-  }, [isActive, modelStatus, processLoop]);
+  }, [isActive, modelStatus, processFrame]);
 
   return {
     modelStatus,
@@ -363,7 +424,6 @@ export function useVisionPipeline({
     pupilData: pupilUiState,
   };
 }
-
 
 /**
  * High-performance canvas drawing function for live landmarks, irises, and detected pupils.
@@ -522,6 +582,25 @@ function drawEyeContour(
   ctx.fill();
 }
 
+function drawMirroredText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  font: string,
+  fillStyle: string
+) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(-1, 1); // Invert text so it displays forward on -scale-x-100 mirrored canvas
+  ctx.font = font;
+  ctx.fillStyle = fillStyle;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
+
 function drawIrisOverlay(
   ctx: CanvasRenderingContext2D,
   iris: { center: NormalizedLandmark; perimeter: readonly NormalizedLandmark[] | NormalizedLandmark[]; estimatedRadiusNorm: number },
@@ -543,10 +622,15 @@ function drawIrisOverlay(
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Tag
-  ctx.font = '9px "JetBrains Mono", monospace';
-  ctx.fillStyle = '#94a3b8';
-  ctx.fillText(`IRIS (${label})`, cx - 18, cy - radiusPx - 5);
+  // Tag with unmirrored text
+  drawMirroredText(
+    ctx,
+    `IRIS (${label})`,
+    cx,
+    cy - radiusPx - 8,
+    '10px "JetBrains Mono", monospace',
+    '#94a3b8'
+  );
 }
 
 function drawPupilOverlay(
@@ -592,12 +676,19 @@ function drawPupilOverlay(
   ctx.fillStyle = 'rgba(168, 85, 247, 0.15)';
   ctx.fill();
 
-  // Draw Pupil Diameter Tag (in pixels)
+  // Draw Pupil Diameter Tag with unmirrored physical and pixel readings
   if (pupil.diameterPx) {
-    ctx.font = '10px "JetBrains Mono", monospace';
-    ctx.fillStyle = '#f1f5f9';
-    const text = `${label}: ${pupil.diameterPx.toFixed(1)}px`;
-    ctx.fillText(text, cx - 30, cy + radiusPx + 14);
+    const text = pupil.diameterMm
+      ? `${label}: ${pupil.diameterMm.toFixed(1)}mm (${pupil.diameterPx.toFixed(1)}px)`
+      : `${label}: ${pupil.diameterPx.toFixed(1)}px`;
+    drawMirroredText(
+      ctx,
+      text,
+      cx,
+      cy + radiusPx + 14,
+      'bold 10px "JetBrains Mono", monospace',
+      '#f1f5f9'
+    );
   }
 }
 
@@ -637,7 +728,6 @@ function drawNeuralPupilOverlay(
     ctx.fillText(`${label}: ${neuralPupil.diameterPx.toFixed(1)}px`, cx - 28, cy - radiusPx - 6);
   }
 }
-
 
 function drawGuidanceReticle(
   ctx: CanvasRenderingContext2D,

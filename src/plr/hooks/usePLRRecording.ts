@@ -62,12 +62,18 @@ export function usePLRRecording({ stimulus, onFrameCapture }: UsePLRRecordingPro
     }
   }, []);
 
-  // Update animated progress bar
+  const lastProgressUpdateRef = useRef<number>(0);
+
+  // Update animated progress bar (throttled to 10 Hz to prevent React render storms)
   const updateProgress = useCallback(() => {
     if (sessionStartTimeRef.current > 0) {
-      const elapsed = performance.now() - sessionStartTimeRef.current;
-      const pct = Math.min(100, Math.round((elapsed / TOTAL_SCREENING_DURATION_MS) * 100));
-      setProgressPercent(pct);
+      const now = performance.now();
+      if (now - lastProgressUpdateRef.current >= 100) {
+        lastProgressUpdateRef.current = now;
+        const elapsed = now - sessionStartTimeRef.current;
+        const pct = Math.min(100, Math.round((elapsed / TOTAL_SCREENING_DURATION_MS) * 100));
+        setProgressPercent(pct);
+      }
     }
     progressAnimRef.current = window.requestAnimationFrame(updateProgress);
   }, []);

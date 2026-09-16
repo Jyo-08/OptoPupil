@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import { useCamera } from '../camera/useCamera';
 import { useVisionPipeline } from '../hooks/useVisionPipeline';
 import { useMeasurementPersistence } from '../hooks/useMeasurementPersistence';
@@ -15,7 +15,12 @@ import { usePLRRecording } from '../plr/hooks/usePLRRecording';
 import { RecordingController } from '../components/plr/RecordingController';
 import { PLRWaveformChart } from '../components/plr/PLRWaveformChart';
 import { PLRMetricsCard } from '../components/plr/PLRMetricsCard';
-import { ArrowLeft, Play, Square, RefreshCw, Eye } from 'lucide-react';
+import { TriageAlertBanner } from '../components/safety/TriageAlertBanner';
+import { PatientContextModal } from '../components/patient/PatientContextModal';
+import { ClinicalReportModal } from '../components/reports/ClinicalReportModal';
+import { RedFlagEngine } from '../safety/redFlagEngine';
+import type { PatientContext } from '../safety/types';
+import { ArrowLeft, Play, Square, RefreshCw, Eye, ClipboardList, FileText } from 'lucide-react';
 
 interface VisionPageProps {
   onBack: () => void;
@@ -23,6 +28,17 @@ interface VisionPageProps {
 
 export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Patient Context & Symptom Checklist State
+  const [isContextModalOpen, setIsContextModalOpen] = useState<boolean>(false);
+  const [isReportModalOpen, setIsReportModalOpen] = useState<boolean>(false);
+  const [patientContext, setPatientContext] = useState<PatientContext>({
+    patientId: 'PT-' + Math.floor(1000 + Math.random() * 9000),
+    ageYears: 24,
+    mechanism: 'ROUTINE_BASELINE_SCREEN',
+    timeElapsed: 'NOT_APPLICABLE',
+    symptoms: [],
+  });
 
   // Initialize Camera Hook (auto-start when entering Vision page)
   const {
@@ -46,6 +62,11 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
   const recordingState = usePLRRecording({
     stimulus: stimulusController,
   });
+
+  // Deterministic Red-Flag Triage Engine Assessment
+  const triageAssessment = useMemo(() => {
+    return RedFlagEngine.evaluate(recordingState.report, patientContext);
+  }, [recordingState.report, patientContext]);
 
   // Initialize Vision Pipeline (rAF loop with Face Landmarker, Eye Extractor, Pupil Detector & Stabilizer)
   const {
@@ -100,8 +121,25 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
       {/* Full-Screen Pure White Controlled Light Stimulus Overlay (rendered via document.body Portal) */}
       <DisplayStimulusOverlay isActive={isStimulusActive} />
 
+      {/* Patient Trauma Context & Symptom Checklist Modal */}
+      <PatientContextModal
+        isOpen={isContextModalOpen}
+        onClose={() => setIsContextModalOpen(false)}
+        context={patientContext}
+        onSave={(updated) => setPatientContext(updated)}
+      />
+
+      {/* Clinical Pupillometry Report & PDF Modal */}
+      <ClinicalReportModal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        report={recordingState.report}
+        patientContext={patientContext}
+        triageAssessment={triageAssessment}
+      />
+
       {/* Top Header / Stage Breadcrumb */}
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
@@ -121,8 +159,26 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
           </div>
         </div>
 
-        {/* Camera Hardware Controls */}
-        <div className="flex items-center gap-2 font-mono">
+        {/* Patient Context Trigger, PDF Report & Camera Controls */}
+        <div className="flex flex-wrap items-center gap-2 font-mono">
+          <button
+            onClick={() => setIsContextModalOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-cyan-500/30 bg-cyan-950/30 px-3 py-1.5 text-xs text-cyan-300 hover:bg-cyan-900/40 transition"
+          >
+            <ClipboardList className="h-3.5 w-3.5" />
+            <span>Patient: {patientContext.patientId}</span>
+          </button>
+
+          {recordingState.report && (
+            <button
+              onClick={() => setIsReportModalOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 px-3 py-1.5 text-xs font-bold text-slate-950 hover:from-cyan-400 hover:to-blue-500 transition shadow-md shadow-cyan-500/20"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              <span>EXPORT REPORT</span>
+            </button>
+          )}
+
           {cameraState.status === 'active' ? (
             <button
               onClick={() => stopCamera()}
@@ -149,6 +205,15 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
             <RefreshCw className="h-3.5 w-3.5" />
           </button>
         </div>
+      </div>
+
+      {/* Prominent Deterministic Red-Flag Triage Banner */}
+      <div className="mb-6">
+        <TriageAlertBanner
+          assessment={triageAssessment}
+          patientContext={patientContext}
+          onOpenContextModal={() => setIsContextModalOpen(true)}
+        />
       </div>
 
       {/* Main Grid: Responsive 2-Column on Desktop, Stacked on Mobile */}
@@ -211,7 +276,10 @@ export const VisionPage: React.FC<VisionPageProps> = ({ onBack }) => {
         {/* Right Column: Quantitative Kinetics, Bilateral Asymmetry, Tracking Telemetry (5 cols) */}
         <div className="lg:col-span-5 flex flex-col gap-4">
           {/* Quantitative PLR Kinetics & Asymmetry Report Card */}
-          <PLRMetricsCard report={recordingState.report} />
+          <PLRMetricsCard
+            report={recordingState.report}
+            onExportReport={() => setIsReportModalOpen(true)}
+          />
 
           {/* 1. [ BASELINE PERSISTED DB ] */}
           <LatestMeasurementCard
