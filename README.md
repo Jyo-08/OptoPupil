@@ -4,7 +4,7 @@
 > *Developed for VMEDITHON 3.0*
 >
 > # Links
-> Live deployed link - https://optopupil.vercel.app/
+> - Live deployed link - https://optopupil.vercel.app/
 > - Kaggle notebook link - https://www.kaggle.com/code/jyotish1628/notebook64ebcbbf14/notebook
 > - Kaggle real dataset link - https://www.kaggle.com/datasets/itguides/pupil-eye-and-iris-segmentation
 
